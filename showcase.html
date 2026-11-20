@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WinIsland · 样式（无约束版）</title>
+    <link rel="stylesheet" href="style-pro.css" />
+  </head>
+  <body class="pro">
+    <div class="page">
+      <!-- ======================================================== 页头 -->
+      <header class="masthead">
+        <div class="masthead__eyebrow">WinIsland · Visual Layer</div>
+        <h1>液态玻璃<br />与连续圆角</h1>
+        <p>
+          这一版不谈产品文档里的尺寸区间、性能指标和主题数量，只按视觉上限做：
+          真正的连续圆角、能折射桌面内容的多层玻璃、跟着指针走的镜面高光，
+          以及逐元素错峰的内容入场。下面每块都可以现场切换。
+        </p>
+        <div class="masthead__tags">
+          <span class="tag">corner-shape: superellipse</span>
+          <span class="tag">5 层玻璃质感</span>
+          <span class="tag">指针驱动镜面</span>
+          <span class="tag">弹簧形变 404ms</span>
+          <span class="tag">四种外观</span>
+        </div>
+      </header>
+
+      <!-- ======================================================== 主视觉 -->
+      <section class="sect" id="s-hero">
+        <div class="studio">
+          <div class="studio__wall"></div>
+
+          <div class="mock">
+            <div class="mock__bar">
+              <span class="mock__dot"></span><span class="mock__dot"></span
+              ><span class="mock__dot"></span>
+              <span class="mock__addr"></span>
+            </div>
+            <div class="mock__body">
+              <div class="mock__col">
+                <div class="mock__line" style="width: 46%; height: 13px"></div>
+                <div class="mock__line"></div>
+                <div class="mock__line"></div>
+                <div class="mock__block"></div>
+                <div class="mock__line"></div>
+                <div class="mock__line"></div>
+              </div>
+              <div class="mock__col">
+                <div class="mock__block" style="height: 62px"></div>
+                <div class="mock__line"></div>
+                <div class="mock__line"></div>
+                <div class="mock__line"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="readout">
+            <span>几何 <b id="roSize">416 × 156</b></span>
+            <span>圆角 <b id="roRadius">30</b></span>
+            <span>形变 <b id="roDur">—</b></span>
+          </div>
+
+          <div id="heroIsland" class="isl" data-mode="float" data-spec="pointer"></div>
+
+          <div class="studio__label">背景刻意做得有明有暗 —— 玻璃折射的是它</div>
+          <div class="studio__hint">
+            鼠标移过岛面看镜面高光 · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 切形态
+          </div>
+        </div>
+
+        <!-- 控制条 -->
+        <div class="controls">
+          <div class="ctl">
+            <span class="ctl__label">形态</span>
+            <div class="segs" id="segState">
+              <button type="button" data-v="idle">空闲</button>
+              <button type="button" data-v="compact">紧凑</button>
+              <button type="button" data-v="expanded">展开</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="ctl__label">活动</span>
+            <div class="segs" id="segScene">
+              <button type="button" data-v="media">媒体</button>
+              <button type="button" data-v="timer">计时器</button>
+              <button type="button" data-v="volume">音量</button>
+              <button type="button" data-v="transfer">传输</button>
+              <button type="button" data-v="meeting">会议</button>
+              <button type="button" data-v="idle">无活动</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="ctl__label">外观</span>
+            <div class="segs" id="segLook">
+              <button type="button" data-v="obsidian">曜黑</button>
+              <button type="button" data-v="graphite">石墨</button>
+              <button type="button" data-v="frost">霜白</button>
+              <button type="button" data-v="glass">液态玻璃</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="ctl__label">取材</span>
+            <div class="segs" id="segArt">
+              <button type="button" data-v="aurora">极光</button>
+              <button type="button" data-v="ember">余烬</button>
+              <button type="button" data-v="mint">薄荷</button>
+              <button type="button" data-v="rose">玫瑰</button>
+              <button type="button" data-v="steel">钢蓝</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== 三形态几何 -->
+      <section class="sect" id="s-geometry">
+        <div class="sect__head">
+          <span class="sect__num">01</span>
+          <h2 class="sect__title">三形态与连续圆角</h2>
+          <p class="sect__note">
+            半径只依赖高度：r = min(30, h/2)。宽高与圆角由同一帧驱动，所以不会出现先变宽再变高。
+          </p>
+        </div>
+        <div class="ruler" id="ruler"></div>
+      </section>
+
+      <!-- ======================================================== 六场景 -->
+      <section class="sect" id="s-scenes">
+        <div class="sect__head">
+          <span class="sect__num">02</span>
+          <h2 class="sect__title">六类活动的完整版面</h2>
+          <p class="sect__note">
+            每张卡片上方是紧凑态、下方是展开态。卡片自带一层暗壁纸，玻璃才有东西可折射。
+          </p>
+        </div>
+        <div class="grid grid--2" id="sceneGrid"></div>
+      </section>
+
+      <!-- ======================================================== 四外观 -->
+      <section class="sect" id="s-looks">
+        <div class="sect__head">
+          <span class="sect__num">03</span>
+          <h2 class="sect__title">四种外观，四套深度</h2>
+          <p class="sect__note">
+            不是同一个壳换颜色。曜黑靠三段投影压场，石墨有横向冷光，霜白是墨色文字加短投影，
+            玻璃要先把底图压暗才敢用白字。
+          </p>
+        </div>
+        <div class="grid grid--4" id="lookGrid"></div>
+      </section>
+
+      <!-- ======================================================== 圆角对比 -->
+      <section class="sect" id="s-corner">
+        <div class="sect__head">
+          <span class="sect__num">04</span>
+          <h2 class="sect__title">圆弧 vs 连续圆角</h2>
+          <p class="sect__note">
+            同样 96px 半径放大看左上角。圆弧在切线处曲率突变，连续圆角（superellipse）是平滑接的，
+            这是 iOS 那种「看起来更贵」的根源。
+          </p>
+        </div>
+        <div class="corner-zoom">
+          <figure>
+            <div class="slot"><span class="shape" data-cs="round"></span></div>
+            <figcaption>
+              <b>圆弧 · border-radius</b>
+              半径一段圆弧，与直线相接处曲率从 0 跳到 1/r。
+            </figcaption>
+          </figure>
+          <figure>
+            <div class="slot"><span class="shape" data-cs="cont"></span></div>
+            <figcaption>
+              <b>连续圆角 · superellipse(4)</b>
+              曲率连续变化，转角没有硬拐点，边缘光也更连贯。
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ======================================================== 质感剖面 -->
+      <section class="sect" id="s-anatom">
+        <div class="sect__head">
+          <span class="sect__num">05</span>
+          <h2 class="sect__title">玻璃的七层剖面</h2>
+          <p class="sect__note">
+            从底到顶。只有 z0 允许采样背后内容，上面全部是自绘的光学层——这也是透明窗口里唯一能成立的顺序。
+          </p>
+        </div>
+        <div class="anatom">
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: linear-gradient(150deg, #4a5386, #2a2f4a);
+                filter: blur(3px);
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">底折射</span>
+              <span class="anatom__desc"
+                >backdrop-filter：blur(34px) saturate(190%) brightness(.7)。压暗是必需的，不是装饰。</span
+              >
+            </span>
+            <span class="anatom__z">z 0</span>
+          </div>
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: linear-gradient(
+                  172deg,
+                  rgba(255, 255, 255, 0.2),
+                  rgba(0, 0, 0, 0.18)
+                );
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">色调</span>
+              <span class="anatom__desc"
+                >上亮下暗的线性渐变，给材质定性格：冷玻璃、暖霜、中性曜黑。</span
+              >
+            </span>
+            <span class="anatom__z">z 1</span>
+          </div>
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: #23262f;
+                box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.45),
+                  inset 0 -1.5px 0 rgba(0, 0, 0, 0.3);
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">透镜内缘</span>
+              <span class="anatom__desc"
+                >四条 inset 阴影做成厚度：上缘最亮、下缘最沉，左右各一道薄光。</span
+              >
+            </span>
+            <span class="anatom__z">z 2</span>
+          </div>
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: radial-gradient(
+                  60% 120% at 30% 0%,
+                  #fff,
+                  rgba(255, 255, 255, 0.1) 60%,
+                  transparent
+                );
+                mix-blend-mode: screen;
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">指针镜面</span>
+              <span class="anatom__desc"
+                >半径 150px 的径向高光，中心跟着光标（--mx / --my），screen 混合叠加。</span
+              >
+            </span>
+            <span class="anatom__z">z 3</span>
+          </div>
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: #23262f;
+                box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">边缘环</span>
+              <span class="anatom__desc"
+                >conic-gradient 加 1px 遮罩环，角度由光标相对中心的方向算出，看起来像光在绕边走。</span
+              >
+            </span>
+            <span class="anatom__z">z 4</span>
+          </div>
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: #23262f repeating-linear-gradient(
+                    45deg,
+                    rgba(255, 255, 255, 0.16) 0 1px,
+                    transparent 1px 3px
+                  );
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">颗粒</span>
+              <span class="anatom__desc"
+                >feTurbulence 噪声压到 7%，overlay 混合。没有这一层，玻璃会像塑料。</span
+              >
+            </span>
+            <span class="anatom__z">z 5</span>
+          </div>
+          <div class="anatom__row">
+            <span
+              class="anatom__chip"
+              style="
+                background: radial-gradient(
+                  120% 140% at 8% 108%,
+                  #9dc9fd,
+                  transparent 62%
+                );
+                mix-blend-mode: screen;
+              "
+            ></span>
+            <span class="anatom__body">
+              <span class="anatom__name">强调光</span>
+              <span class="anatom__desc"
+                >封面主色在左下角晕开，只在展开态出现，给内容定色而不抢文字。</span
+              >
+            </span>
+            <span class="anatom__z">z 6</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== 排版与色板 -->
+      <section class="sect" id="s-type">
+        <div class="sect__head">
+          <span class="sect__num">06</span>
+          <h2 class="sect__title">排版标尺与取色</h2>
+          <p class="sect__note">
+            字号按 1.22 倍数列取值；字重只用 400 / 500 / 600 / 680 四档；所有数字都开等宽数字。
+          </p>
+        </div>
+        <div class="grid grid--2">
+          <div class="card">
+            <div class="card__head">
+              <span class="card__name">字号标尺</span>
+              <span class="card__dim">Segoe UI Variable</span>
+            </div>
+            <div class="typescale">
+              <div class="typescale__row">
+                <span
+                  class="typescale__sample"
+                  style="font-size: 40px; font-weight: 680; letter-spacing: -0.03em"
+                  >18:42</span
+                >
+                <span class="typescale__meta">40 / 680 / -0.03em</span>
+              </div>
+              <div class="typescale__row">
+                <span
+                  class="typescale__sample"
+                  style="font-size: 32px; font-weight: 680; letter-spacing: -0.03em"
+                  >62</span
+                >
+                <span class="typescale__meta">32 / 680 / -0.03em</span>
+              </div>
+              <div class="typescale__row">
+                <span
+                  class="typescale__sample"
+                  style="font-size: 15.5px; font-weight: 600; letter-spacing: -0.012em"
+                  >夜航西飞</span
+                >
+                <span class="typescale__meta">15.5 / 600 / -0.012em</span>
+              </div>
+              <div class="typescale__row">
+                <span class="typescale__sample" style="font-size: 13px; font-weight: 400"
+                  >The Velvet Hours · Late Lines</span
+                >
+                <span class="typescale__meta">13 / 400 / 0</span>
+              </div>
+              <div class="typescale__row">
+                <span
+                  class="typescale__sample"
+                  style="font-size: 12.5px; font-weight: 600"
+                  >加入会议 · 稍后提醒</span
+                >
+                <span class="typescale__meta">12.5 / 600 / -0.004em</span>
+              </div>
+              <div class="typescale__row">
+                <span
+                  class="typescale__sample"
+                  style="font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums"
+                  >2:14 / 3:36 · 78%</span
+                >
+                <span class="typescale__meta">11.5 / 500 / tabular</span>
+              </div>
+              <div class="typescale__row" style="border-bottom: 0">
+                <span
+                  class="typescale__sample"
+                  style="font-size: 10.5px; font-weight: 500; font-variant-numeric: tabular-nums"
+                  >12.4 MB/s · 18.2 / 23.4 MB</span
+                >
+                <span class="typescale__meta">10.5 / 500 / tabular</span>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card__head">
+              <span class="card__name">取自封面的强调色</span>
+              <span class="card__dim">装饰面 / 压字面</span>
+            </div>
+            <div class="swatches" id="swatches"></div>
+            <div
+              style="
+                margin-top: 16px;
+                font-size: var(--fs-meta);
+                color: rgba(231, 233, 240, 0.44);
+                line-height: 1.6;
+              "
+            >
+              每套取材给两个色：<b style="color: rgba(231, 233, 240, 0.8)">acc</b> 用于进度条、光环、波形这些装饰面；
+              <b style="color: rgba(231, 233, 240, 0.8)">acc-on</b> 是同一色相压深后的实心面，磁贴和主按钮用它，
+              保证上面的白字都在 4.5:1 以上。亮色调（比如琥珀）直接压白字只有 1.7:1，所以必须拆成两个。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== 页脚 -->
+      <footer class="colophon">
+        <span><b>实现</b> style-pro.css + scenes-pro.js</span>
+        <span><b>形变</b> 半隐式欧拉弹簧 k=250 c=24 · 收起增益 ×1.75/×1.38</span>
+        <span><b>圆角</b> corner-shape: superellipse(4)</span>
+        <span><b>字体</b> Segoe UI Variable（可变字重轴）</span>
+      </footer>
+    </div>
+
+    <script src="scenes-pro.js"></script>
+    <script>
+      (function () {
+        "use strict";
+
+        var P = window.WinIslandPro;
+        var hero = document.getElementById("heroIsland");
+        var roSize = document.getElementById("roSize");
+        var roRadius = document.getElementById("roRadius");
+        var roDur = document.getElementById("roDur");
+
+        var S = {
+          scene: "media",
+          state: "expanded",
+          look: "glass",
+          art: "aurora",
+          paused: false,
+          /* 与 style-demo 同一组标定值 */
+          k: 250,
+          c: 24,
+          kCol: 1.75,
+          cCol: 1.38
+        };
+
+        /* ---------------------------------------------------------- 弹簧 */
+        function spring(v) {
+          return { v: v, vel: 0, target: v, from: v };
+        }
+        var sw = spring(416);
+        var sh = spring(156);
+
+        function integrate(s, dt, k, c) {
+          var steps = Math.max(1, Math.ceil(dt / (1 / 240)));
+          var h = dt / steps;
+          for (var i = 0; i < steps; i++) {
+            var a = -k * (s.v - s.target) - c * s.vel;
+            s.vel += a * h;
+            s.v += s.vel * h;
+          }
+        }
+        function withinPct(s, pct) {
+          var d = Math.abs(s.target - s.from);
+          if (d < 0.5) return true;
+          return Math.abs(s.v - s.target) <= Math.max(0.5, d * pct);
+        }
+        function settled(s) {
+          return Math.abs(s.v - s.target) < 0.4 && Math.abs(s.vel) < 12;
+        }
+
+        /* ---------------------------------------------------------- 绘制 */
+        var rafId = 0,
+          lastT = 0,
+          morphing = false,
+          morphStart = 0,
+          lastAbove = 0;
+
+        function paint() {
+          var h = sh.v;
+          hero.style.setProperty("--w", sw.v.toFixed(2) + "px");
+          hero.style.setProperty("--h", h.toFixed(2) + "px");
+          var r = Math.min(30, h / 2);
+          hero.style.setProperty("--r", r.toFixed(2) + "px");
+          roSize.textContent = Math.round(sw.v) + " × " + Math.round(h);
+          roRadius.textContent = r.toFixed(1);
+          heroRect = hero.getBoundingClientRect();
+        }
+
+        function loop(t) {
+          if (!lastT) lastT = t;
+          var dt = Math.min(0.05, (t - lastT) / 1000);
+          lastT = t;
+
+          var expanding = S.state === "expanded";
+          var k = expanding ? S.k : S.k * S.kCol;
+          var c = expanding ? S.c : S.c * S.cCol;
+
+          if (!settled(sw)) integrate(sw, dt, k, c);
+          if (!settled(sh)) integrate(sh, dt, k * 1.06, c * 1.02);
+
+          if (!(withinPct(sw, 0.01) && withinPct(sh, 0.01))) lastAbove = t;
+
+          if (settled(sw)) {
+            sw.v = sw.target;
+            sw.vel = 0;
+          }
+          if (settled(sh)) {
+            sh.v = sh.target;
+            sh.vel = 0;
+          }
+          paint();
+
+          if (settled(sw) && settled(sh)) {
+            if (morphing) {
+              var dur = lastAbove > morphStart ? Math.round(lastAbove - morphStart) : 0;
+              roDur.textContent = dur + " ms";
+              morphing = false;
+            }
+            rafId = 0;
+            lastT = 0;
+            refreshRects();
+          } else {
+            rafId = requestAnimationFrame(loop);
+          }
+        }
+
+        function kick() {
+          if (!rafId) {
+            lastT = 0;
+            rafId = requestAnimationFrame(loop);
+          }
+        }
+
+        function setState(next, immediate) {
+          if (next === S.state && !immediate) return;
+          S.state = next;
+          hero.setAttribute("data-state", next);
+          var pair = P.sizeFor(S.scene, next);
+          sw.from = sw.v;
+          sh.from = sh.v;
+          sw.target = pair[0];
+          sh.target = pair[1];
+          morphing = true;
+          lastAbove = 0;
+          morphStart = performance.now();
+          kick();
+        }
+
+        /* ---------------------------------------------------- 指针镜面 */
+        var heroRect = null;
+        var specEls = [];
+        var ptrRaf = 0;
+        var ptrX = 0,
+          ptrY = 0;
+
+        function collectSpec() {
+          specEls = [];
+          var list = document.querySelectorAll('.isl[data-spec="pointer"]');
+          for (var i = 0; i < list.length; i++) {
+            specEls.push({ el: list[i], rect: null });
+          }
+          refreshRects();
+        }
+
+        function refreshRects() {
+          for (var i = 0; i < specEls.length; i++) {
+            specEls[i].rect = specEls[i].el.getBoundingClientRect();
+          }
+        }
+
+        function applyPointer() {
+          ptrRaf = 0;
+          for (var i = 0; i < specEls.length; i++) {
+            var o = specEls[i];
+            var r = o.rect;
+            if (!r || !r.width) continue;
+            var x = (ptrX - r.left) / r.width;
+            var y = (ptrY - r.top) / r.height;
+            /* 允许略微越界，光标在岛外时高光会滑出去，看起来更像真实光源 */
+            o.el.style.setProperty("--mx", (x * 100).toFixed(1) + "%");
+            o.el.style.setProperty("--my", (y * 100).toFixed(1) + "%");
+            var ang =
+              (Math.atan2(ptrY - (r.top + r.height / 2), ptrX - (r.left + r.width / 2)) *
+                180) /
+                 Math.PI +
+              90;
+            o.el.style.setProperty("--edge-ang", ang.toFixed(1) + "deg");
+          }
+        }
+
+        document.addEventListener(
+          "pointermove",
+          function (e) {
+            ptrX = e.clientX;
+            ptrY = e.clientY;
+            if (!ptrRaf) ptrRaf = requestAnimationFrame(applyPointer);
+          },
+          { passive: true }
+        );
+        window.addEventListener("scroll", refreshRects, { passive: true });
+        window.addEventListener("resize", refreshRects);
+
+        /* ------------------------------------------------------ 控制条 */
+        function syncSegs() {
+          var map = {
+            segState: S.state,
+            segScene: S.scene,
+            segLook: S.look,
+            segArt: S.art
+          };
+          Object.keys(map).forEach(function (id) {
+            var box = document.getElementById(id);
+            if (!box) return;
+            var btns = box.querySelectorAll("button");
+            for (var i = 0; i < btns.length; i++) {
+              btns[i].setAttribute(
+                "aria-pressed",
+                btns[i].getAttribute("data-v") === map[id] ? "true" : "false"
+              );
+            }
+          });
+        }
+
+        function bindSeg(id, apply) {
+          var box = document.getElementById(id);
+          if (!box) return;
+          box.addEventListener("click", function (e) {
+            var b = e.target.closest("button[data-v]");
+            if (!b) return;
+            apply(b.getAttribute("data-v"));
+            syncSegs();
+          });
+        }
+
+        bindSeg("segState", function (v) {
+          setState(v);
+        });
+        bindSeg("segScene", function (v) {
+          S.scene = v;
+          hero.setAttribute("data-scene", v);
+          P.render(hero, { art: S.art, paused: S.paused });
+          if (v === "idle") {
+            setState("idle");
+          } else if (S.state === "idle") {
+            setState("compact");
+          } else {
+            setState(S.state, true);
+          }
+        });
+        bindSeg("segLook", function (v) {
+          S.look = v;
+          hero.setAttribute("data-look", v);
+        });
+        bindSeg("segArt", function (v) {
+          S.art = v;
+          P.render(hero, { art: v, paused: S.paused });
+        });
+
+        /* 键盘 1/2/3 切形态 */
+        window.addEventListener("keydown", function (e) {
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          var map = { 1: "idle", 2: "compact", 3: "expanded" };
+          if (map[e.key]) {
+            setState(map[e.key]);
+            syncSegs();
+          }
+        });
+
+        /* -------------------------------------------------------- 几何 */
+        /* 半径只依赖高度的公式，在卡片里直接用 */
+        function island(opts) {
+          var el = document.createElement("div");
+          el.className = "isl";
+          el.setAttribute("data-mode", opts.mode || "inline");
+          if (opts.spec) el.setAttribute("data-spec", "pointer");
+          P.mount(el, opts);
+          return el;
+        }
+
+        var ruler = document.getElementById("ruler");
+        [
+          { state: "idle", name: "空闲", note: "呼吸点", dim: "132 × 30 · r 15" },
+          { state: "compact", name: "紧凑", note: "左封面 + 右状态", dim: "248 × 38 · r 19" },
+          { state: "expanded", name: "展开", note: "封面 + 三行控制", dim: "416 × 156 · r 30" }
+        ].forEach(function (row) {
+          var wrap = document.createElement("div");
+          wrap.className = "ruler__row";
+          wrap.innerHTML =
+            '<span class="ruler__tag"><b>' +
+            row.name +
+            "</b>" +
+            row.note +
+            '</span><span class="ruler__stage"></span><span class="ruler__dim">' +
+            row.dim +
+            "</span>";
+          wrap.querySelector(".ruler__stage").appendChild(
+            island({ scene: "media", state: row.state, look: "glass", art: "aurora" })
+          );
+          ruler.appendChild(wrap);
+        });
+
+        /* ------------------------------------------------------ 场景画廊 */
+        var SCENE_LIST = [
+          { k: "media", name: "媒体播放", note: "封面、进度、上一首/播放/下一首" },
+          { k: "timer", name: "计时器", note: "环形进度 + 大数字 + 三个动作" },
+          { k: "volume", name: "音量", note: "设备信息 + 24 段音量条" },
+          { k: "transfer", name: "传输", note: "三个文件并行，各自进度与体积" },
+          { k: "meeting", name: "会议", note: "时间地点 + 稍后/加入" },
+          { k: "idle", name: "无活动", note: "只留一处呼吸点，不显示任何文案" }
+        ];
+
+        var grid = document.getElementById("sceneGrid");
+        SCENE_LIST.forEach(function (sc, i) {
+          var art = ["aurora", "ember", "mint", "steel", "rose", "aurora"][i % 6];
+          var card = document.createElement("div");
+          card.className = "card";
+          card.setAttribute("data-backdrop", "on");
+
+          var states = sc.k === "idle" ? ["idle"] : ["compact", "expanded"];
+          var pair = document.createElement("div");
+          pair.className = "card__pair";
+          states.forEach(function (st) {
+            pair.appendChild(
+              island({ scene: sc.k, state: st, look: "glass", art: art })
+            );
+          });
+
+          card.innerHTML =
+            '<div class="card__head"><span class="card__name">' +
+            sc.name +
+            '</span><span class="card__dim">' +
+            sc.note +
+            "</span></div>";
+          card.appendChild(pair);
+          grid.appendChild(card);
+        });
+
+        /* ------------------------------------------------------ 外观画廊 */
+        var LOOKS = [
+          { k: "obsidian", name: "曜黑", note: "不透明 · 三段投影" },
+          { k: "graphite", name: "石墨", note: "横向冷光 · 曲面感" },
+          { k: "frost", name: "霜白", note: "墨色文字 · 短投影" },
+          { k: "glass", name: "液态玻璃", note: "真折射 · 压暗底图" }
+        ];
+        var lookGrid = document.getElementById("lookGrid");
+        LOOKS.forEach(function (lk) {
+          var card = document.createElement("div");
+          card.className = "card";
+          card.setAttribute("data-backdrop", "on");
+          card.innerHTML =
+            '<div class="card__head"><span class="card__name">' +
+            lk.name +
+            '</span><span class="card__dim">' +
+            lk.note +
+            "</span></div>";
+          var pair = document.createElement("div");
+          pair.className = "card__pair";
+          pair.appendChild(
+            island({
+              scene: "media",
+              state: "expanded",
+              look: lk.k,
+              art: "aurora",
+              spec: true
+            })
+          );
+          card.appendChild(pair);
+          lookGrid.appendChild(card);
+        });
+
+        /* -------------------------------------------------------- 色板 */
+        var swWrap = document.getElementById("swatches");
+        var names = {
+          aurora: "极光",
+          ember: "余烬",
+          mint: "薄荷",
+          rose: "玫瑰",
+          steel: "钢蓝"
+        };
+        Object.keys(P.ART).forEach(function (k) {
+          var a = P.ART[k];
+          [["acc", a.acc], ["acc-on", a.on]].forEach(function (pair) {
+            var d = document.createElement("div");
+            d.className = "sw";
+            d.innerHTML =
+              '<div class="sw__chip" style="background:' +
+              pair[1] +
+              '"></div><div class="sw__meta"><div class="sw__name">' +
+              names[k] +
+              " · " +
+              pair[0] +
+              '</div><div class="sw__val">' +
+              pair[1] +
+              "</div></div>";
+            swWrap.appendChild(d);
+          });
+        });
+
+        /* -------------------------------------------------------- 启动 */
+        P.ensureShell(hero);
+        P.render(hero, { art: S.art });
+        /* 从紧凑态弹到展开态，让第一眼就是动的 */
+        var start = P.sizeFor(S.scene, "compact");
+        sw.v = start[0];
+        sh.v = start[1];
+        paint();
+        collectSpec();
+        syncSegs();
+        setTimeout(function () {
+          setState("expanded", true);
+        }, 700);
+      })();
+    </script>
+  </body>
+</html>

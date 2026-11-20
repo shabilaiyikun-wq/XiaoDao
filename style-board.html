@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>WinIsland · 样式对照板 v0.1</title>
+<link rel="stylesheet" href="winisland.css" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 34px 40px 56px;
+    background: #0b0c10;
+    color: #e8e9ee;
+    font-family: "Segoe UI Variable Display", "Segoe UI Variable Text",
+      "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header { margin-bottom: 26px; }
+  h1 { margin: 0 0 6px; font-size: 20px; font-weight: 640; letter-spacing: -0.3px; }
+  .sub { margin: 0; font-size: 12.5px; color: #6f7580; line-height: 1.65; }
+
+  section { margin-bottom: 30px; }
+  h2 {
+    margin: 0 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6f7580;
+  }
+  .grid { display: flex; flex-wrap: wrap; gap: 16px; }
+
+  /* 卡片：一块壁纸 + 居中一个岛 + 标注 */
+  .card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 30px 22px 26px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  }
+  .card--dark {
+    background:
+      radial-gradient(70% 60% at 14% 0%, #1e2f55 0%, transparent 62%),
+      radial-gradient(64% 58% at 88% 18%, #3d1f52 0%, transparent 66%),
+      linear-gradient(160deg, #07080c, #0a0d14 55%, #05070a);
+  }
+  .card--light {
+    background:
+      radial-gradient(62% 58% at 8% 6%, #fff2df 0%, transparent 62%),
+      radial-gradient(64% 64% at 92% 24%, #d9e8ff 0%, transparent 66%),
+      linear-gradient(160deg, #f6f8fc, #e9eff9 58%, #f8f5f0);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+  .card--busy {
+    background:
+      radial-gradient(42% 40% at 18% 22%, #ff5f6d 0%, transparent 62%),
+      radial-gradient(40% 38% at 68% 16%, #ffc371 0%, transparent 62%),
+      radial-gradient(46% 46% at 84% 76%, #24d0a0 0%, transparent 62%),
+      radial-gradient(44% 42% at 26% 84%, #4f8cff 0%, transparent 64%),
+      linear-gradient(140deg, #131a2b, #1d0f24);
+  }
+  /* 棋盘格：验证毛玻璃与半透明 */
+  .card--checker {
+    background-color: #14161c;
+    background-image:
+      linear-gradient(45deg, #1b1e26 25%, transparent 25%),
+      linear-gradient(-45deg, #1b1e26 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1b1e26 75%),
+      linear-gradient(-45deg, transparent 75%, #1b1e26 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  }
+
+  .cap {
+    position: absolute;
+    top: 9px;
+    left: 11px;
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-size: 11px;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.58);
+    font-variant-numeric: tabular-nums;
+  }
+  .card--light .cap { color: rgba(0, 0, 0, 0.46); }
+  .cap b { font-weight: 600; color: rgba(255, 255, 255, 0.9); }
+  .card--light .cap b { color: rgba(0, 0, 0, 0.78); }
+  .cap i { font-style: normal; opacity: 0.78; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>WinIsland 样式对照板</h1>
+  <p class="sub">
+    全部 1:1 按 100% 缩放绘制，标注为真实 DIP 尺寸与圆角。规格来源：产品文档 §5.1 三形态 / §8.1 视觉 / §8.2 动画。<br />
+    底色三种壁纸分别对应：深色、浅色、花哨（最差情况），用来判断轮廓与可读性。
+  </p>
+</header>
+
+<div id="board"></div>
+
+<script src="winisland-scenes.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var board = document.getElementById("board");
+
+  var SCENE_NAME = {
+    media: "媒体播放",
+    timer: "计时器",
+    volume: "音量 OSD",
+    transfer: "文件传输",
+    meeting: "会议提醒",
+    idle: "无活动"
+  };
+  var LOOK_NAME = { obsidian: "纯黑", light: "亮色", acrylic: "毛玻璃" };
+
+  function section(title, cards) {
+    var s = document.createElement("section");
+    var h = document.createElement("h2");
+    h.textContent = title;
+    s.appendChild(h);
+    var g = document.createElement("div");
+    g.className = "grid";
+    cards.forEach(function (c) { g.appendChild(c); });
+    s.appendChild(g);
+    board.appendChild(s);
+  }
+
+  /**
+   * 造一张卡：壁纸 + 岛 + 标注
+   * @param {{scene,state,look,wall,title,sub,pad}} o
+   */
+  function card(o) {
+    var wrap = document.createElement("div");
+    wrap.className = "card card--" + (o.wall || "dark");
+
+    var cap = document.createElement("div");
+    cap.className = "cap";
+    cap.innerHTML = "<b>" + o.title + "</b>" + (o.sub ? "<i>" + o.sub + "</i>" : "");
+    wrap.appendChild(cap);
+
+    var el = WinIsland.create(o.scene, o.state, o.look);
+    WinIsland.render(el);
+    wrap.appendChild(el);
+    WinIsland.applySize(el);
+
+    // 让卡片刚好包住岛，不留大片空白
+    var table = WinIsland.SIZES[o.scene] || WinIsland.SIZES.idle;
+    var pair = table[o.state] || table.idle;
+    wrap.style.width = pair[0] + (o.pad || 96) + "px";
+    wrap.style.height = pair[1] + (o.pad || 96) + "px";
+    return wrap;
+  }
+
+  function dims(scene, state) {
+    var table = WinIsland.SIZES[scene] || WinIsland.SIZES.idle;
+    var p = table[state] || table.idle;
+    var r = state === "expanded" ? Math.min(28, p[1] / 2) : p[1] / 2;
+    return p[0] + "×" + p[1] + " · r" + r;
+  }
+
+  /* 一、三形态 */
+  section(
+    "一 · 三种形态（媒体 · 纯黑）",
+    ["idle", "compact", "expanded"].map(function (st) {
+      return card({
+        scene: "media",
+        state: st,
+        look: "obsidian",
+        title: { idle: "空闲 Idle", compact: "紧凑 Compact", expanded: "展开 Expanded" }[st],
+        sub: dims("media", st)
+      });
+    })
+  );
+
+  /* 二、四种主题 */
+  section(
+    "二 · 四种主题（媒体 · 展开 400×140）",
+    ["obsidian", "light", "acrylic"].map(function (lk) {
+      return card({
+        scene: "media",
+        state: "expanded",
+        look: lk,
+        wall: lk === "light" ? "light" : lk === "acrylic" ? "busy" : "dark",
+        title: LOOK_NAME[lk],
+        sub: "400×140 · r28"
+      });
+    }).concat([
+      card({
+        scene: "media",
+        state: "expanded",
+        look: "acrylic",
+        wall: "checker",
+        title: "毛玻璃",
+        sub: "棋盘底 · 看透光"
+      })
+    ])
+  );
+
+  /* 三、紧凑态各场景 */
+  section(
+    "三 · 紧凑态 · 各类活动（纯黑 · 深色壁纸）",
+    ["media", "timer", "volume", "transfer", "meeting", "idle"].map(function (sc) {
+      return card({
+        scene: sc,
+        state: sc === "idle" ? "idle" : "compact",
+        look: "obsidian",
+        title: SCENE_NAME[sc],
+        sub: dims(sc, sc === "idle" ? "idle" : "compact"),
+        pad: 70
+      });
+    })
+  );
+
+  /* 四、展开态各场景 */
+  section(
+    "四 · 展开态 · 各类活动（纯黑 · 深色壁纸）",
+    ["media", "timer", "volume", "transfer", "meeting"].map(function (sc) {
+      return card({
+        scene: sc,
+        state: "expanded",
+        look: "obsidian",
+        title: SCENE_NAME[sc],
+        sub: dims(sc, "expanded"),
+        pad: 76
+      });
+    })
+  );
+
+  /* 五、极端底色对照 */
+  section(
+    "五 · 轮廓与可读性压力测试",
+    [
+      card({ scene: "media", state: "compact", look: "obsidian", wall: "light", title: "纯黑 on 浅壁纸", sub: "226×36 · r18", pad: 74 }),
+      card({ scene: "media", state: "compact", look: "light", wall: "busy", title: "亮色 on 花哨壁纸", sub: "226×36 · r18", pad: 74 }),
+      card({ scene: "media", state: "compact", look: "acrylic", wall: "busy", title: "毛玻璃 on 花哨壁纸", sub: "226×36 · r18", pad: 74 }),
+      card({ scene: "media", state: "compact", look: "light", wall: "light", title: "亮色 on 浅壁纸", sub: "226×36 · r18", pad: 74 })
+    ]
+  );
+
+  window.__boardReady = true;
+})();
+</script>
+</body>
+</html>

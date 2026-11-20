@@ -1,0 +1,92 @@
+﻿[
+    {
+        "Name":  "N0 找到能开菜单的岛内锚点",
+        "Ok":  true,
+        "Detail":  "(680,10) items=12"
+    },
+    {
+        "Name":  "N1 根菜单正好 12 项",
+        "Ok":  true,
+        "Detail":  "count=12 : 场景 | 外观 | 取材 | 形态 | 桌宠 |  | 截图  Alt+A | 允许截图与录屏捕捉 | 拖出后从暂存移除 | 把剪贴板里的文件暂存 | 复位位置 | 退出 WinIsland"
+    },
+    {
+        "Name":  "N2 桌宠子菜单 6 个具名项齐全",
+        "Ok":  true,
+        "Detail":  "found=启用桌宠,戳击,转圈,表情模式,全部动画 (28),恢复随机待机"
+    },
+    {
+        "Name":  "N3 「全部动画 (28)」下 9 个分组都在",
+        "Ok":  true,
+        "Detail":  "groups=Blocked (3),Bodymoves (1),Done (3),Idle (3),Logo (2),Marketing (4),Rotation (3),Streaming (3),Working (6)"
+    },
+    {
+        "Name":  "N4 28 段全部可从菜单点下去",
+        "Ok":  true,
+        "Detail":  "clicked=28/28 bad="
+    },
+    {
+        "Name":  "N5 日志确认 28 段都真的交给桌宠播放",
+        "Ok":  true,
+        "Detail":  "logOk=28/28 missing="
+    },
+    {
+        "Name":  "N6 每段都留了桌宠抓帧",
+        "Ok":  true,
+        "Detail":  "files=28"
+    },
+    {
+        "Name":  "N7 片段名保留下划线（不出现 BlockedA）",
+        "Ok":  true,
+        "Detail":  "ok"
+    },
+    {
+        "Name":  "N8 「启用桌宠」点一次就关掉桌宠",
+        "Ok":  true,
+        "Detail":  "petWindows=0"
+    },
+    {
+        "Name":  "N9 关掉后偏好写 pet=0",
+        "Ok":  true,
+        "Detail":  "scene=media;look=glass;art=aurora;capture=1;transferOut=0;pet=0;"
+    },
+    {
+        "Name":  "N10 再点一次重新打开桌宠",
+        "Ok":  true,
+        "Detail":  "petWindows=1"
+    },
+    {
+        "Name":  "N11 重新打开后偏好写 pet=1",
+        "Ok":  true,
+        "Detail":  "scene=media;look=glass;art=aurora;capture=1;transferOut=0;pet=1;"
+    },
+    {
+        "Name":  "N12 「表情模式 ▸ 开心 happy」可点",
+        "Ok":  true,
+        "Detail":  "invoked=True"
+    },
+    {
+        "Name":  "N13 既有「场景 ▸ 待办」仍可点（回归）",
+        "Ok":  true,
+        "Detail":  "clicked=True"
+    },
+    {
+        "Name":  "N14 既有「截图」仍可点（回归）",
+        "Ok":  true,
+        "Detail":  "clicked=True"
+    },
+    {
+        "Name":  "N15 「退出 WinIsland」项存在",
+        "Ok":  true,
+        "Detail":  "names=场景|外观|取材|形态|桌宠||截图  Alt+A|允许截图与录屏捕捉|拖出后从暂存移除|把剪贴板里的文件暂存|复位位置|退出 WinIsland"
+    },
+    {
+        "Name":  "N16 点「退出」进程正常结束",
+        "Ok":  true,
+        "Detail":  "exited=True exit=0"
+    },
+    {
+        "Name":  "N17 退出后无残留进程",
+        "Ok":  true,
+        "Detail":  ""
+    }
+]

@@ -1,0 +1,319 @@
+﻿[Heading1] Windows 灵动岛 产品文档
+版本：v0.1 草案　｜　代号：WinIsland（暂定）　｜　日期：2026-11-19
+[Heading2] 1. 产品概述
+WinIsland 是一款运行在 Windows 10/11 上的常驻桌面工具。它在屏幕顶部（可调整）显示一个悬浮的胶囊形“岛”，把音乐播放、计时器、传输进度、系统提示等零散的临时信息收拢到同一个位置，并通过连续的形变动画在“收起、紧凑、展开”之间切换。
+一句话定位： 为 Windows 提供一个统一的、克制的、可扩展的实时活动中心。
+[Heading2] 2. 背景与问题
+[ListParagraph] {num2} Windows 没有刘海，也没有统一的“实时活动”入口，临时状态散落在任务栏角标、托盘图标、通知中心和各软件自带的小窗里。
+[ListParagraph] {num2} 系统自带的音量、亮度 OSD 样式陈旧，信息少，位置固定，体验割裂。
+[ListParagraph] {num2} 拖拽文件跨窗口、跨桌面搬运时缺少一个临时停靠点。
+[ListParagraph] {num2} 音乐、会议、录屏等状态需要切回对应窗口才能查看或控制，打断工作流。
+[Heading2] 3. 目标用户
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="1895"/><w:gridCol w:w="3357"/><w:gridCol w:w="4107"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1895" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">用户
+<w:tcPr><w:tcW w:w="3357" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">特征
+<w:tcPr><w:tcW w:w="4107" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">核心诉求
+<w:tc><w:tcPr><w:tcW w:w="1895" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">效率型用户
+<w:tcPr><w:tcW w:w="3357" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">多窗口、双屏、长时间办公
+<w:tcPr><w:tcW w:w="4107" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">不切窗口就能查看和控制状态；文件暂存
+<w:tc><w:tcPr><w:tcW w:w="1895" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">音乐/内容爱好者
+<w:tcPr><w:tcW w:w="3357" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">常驻播放器
+<w:tcPr><w:tcW w:w="4107" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">好看的播放控制和歌词/封面展示
+<w:tc><w:tcPr><w:tcW w:w="1895" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">桌面美化玩家
+<w:tcPr><w:tcW w:w="3357" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">热衷 Rainmeter、TranslucentTB 等
+<w:tcPr><w:tcW w:w="4107" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">高质感动画、可自定义主题
+<w:tc><w:tcPr><w:tcW w:w="1895" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">开发者/创作者
+<w:tcPr><w:tcW w:w="3357" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">需要计时、录屏、构建进度提示
+<w:tcPr><w:tcW w:w="4107" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">可接入自己的活动源（插件）
+[Heading2] 4. 产品目标与非目标
+[Heading3] 4.1 目标
+[ListParagraph] {num3} 用统一入口承载实时活动，并保证同一时间信息不过载。
+[ListParagraph] {num3} 动画手感接近原生系统级体验：连续形变、弹簧物理、无掉帧。
+[ListParagraph] {num3} 常驻开销极低，不影响游戏和全屏应用。
+[ListParagraph] {num3} 模块化：每个功能可单独开关，第三方可通过插件扩展。
+[Heading3] 4.2 非目标（至少在 v1 内）
+[ListParagraph] {num4} 不做完整的通知中心替代品，不做小组件面板。
+[ListParagraph] {num4} 不做云同步和账号体系。
+[ListParagraph] {num4} 不收集任何使用数据到服务器（默认离线）。
+[ListParagraph] {num4} 不支持 Windows 10 1809 以下版本。
+[Heading2] 5. 核心概念与交互模型
+[Heading3] 5.1 岛的三种形态
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="2105"/><w:gridCol w:w="4238"/><w:gridCol w:w="3017"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="2105" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">形态
+<w:tcPr><w:tcW w:w="4238" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">说明
+<w:tcPr><w:tcW w:w="3017" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">典型尺寸（100% 缩放）
+<w:tc><w:tcPr><w:tcW w:w="2105" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">空闲（Idle）
+<w:tcPr><w:tcW w:w="4238" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">无活动时，默认极小胶囊或完全隐藏，可在设置中选择
+<w:tcPr><w:tcW w:w="3017" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">约 120×28 px，或隐藏
+<w:tc><w:tcPr><w:tcW w:w="2105" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">紧凑（Compact）
+<w:tcPr><w:tcW w:w="4238" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">有活动时显示单行信息：左侧图标/封面，右侧状态（波形、倒计时、进度）
+<w:tcPr><w:tcW w:w="3017" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">约 220×36 px
+<w:tc><w:tcPr><w:tcW w:w="2105" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">展开（Expanded）
+<w:tcPr><w:tcW w:w="4238" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">悬停或点击后展开为交互面板，显示完整控制
+<w:tcPr><w:tcW w:w="3017" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">约 400×140 px，内容自适应
+形态之间的切换必须是同一个形状的连续形变：宽度、高度、圆角半径、内容透明度同时插值，而不是弹出和关闭两个窗口。
+[Heading3] 5.2 活动（Activity）与优先级
+每个功能模块向岛提交“活动”。岛根据优先级和时效决定显示哪一个。
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="1032"/><w:gridCol w:w="1336"/><w:gridCol w:w="3656"/><w:gridCol w:w="3336"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1032" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">优先级
+<w:tcPr><w:tcW w:w="1336" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">类型
+<w:tcPr><w:tcW w:w="3656" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">示例
+<w:tcPr><w:tcW w:w="3336" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">行为
+<w:tc><w:tcPr><w:tcW w:w="1032" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">P0 瞬时
+<w:tcPr><w:tcW w:w="1336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">一次性反馈
+<w:tcPr><w:tcW w:w="3656" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">音量/亮度变化、静音切换
+<w:tcPr><w:tcW w:w="3336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">临时抢占 1.5 秒，结束后恢复原活动
+<w:tc><w:tcPr><w:tcW w:w="1032" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">P1 紧急
+<w:tcPr><w:tcW w:w="1336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">需要关注
+<w:tcPr><w:tcW w:w="3656" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">会议即将开始、电量过低、计时器结束
+<w:tcPr><w:tcW w:w="3336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">自动展开，需要用户处理或超时收起
+<w:tc><w:tcPr><w:tcW w:w="1032" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">P2 持续
+<w:tcPr><w:tcW w:w="1336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">长时间进行
+<w:tcPr><w:tcW w:w="3656" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">音乐播放、录屏、计时中、文件传输
+<w:tcPr><w:tcW w:w="3336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">常驻紧凑态
+<w:tc><w:tcPr><w:tcW w:w="1032" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">P3 背景
+<w:tcPr><w:tcW w:w="1336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">低价值提示
+<w:tcPr><w:tcW w:w="3656" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">剪贴板新增、输入法切换
+<w:tcPr><w:tcW w:w="3336" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">仅在无更高优先级时短暂展示
+规则：同一时间只主显示一个活动；其余活动在紧凑态以小圆点或次级图标并列显示（最多 1 个），展开态可左右切换。
+[Heading3] 5.3 交互手势
+[ListParagraph] {num5} 悬停：停留 300ms 展开（可调），移开 600ms 后收起。
+[ListParagraph] {num5} 单击：展开或收起；在紧凑态点击封面跳转到对应应用。
+[ListParagraph] {num5} 右键：打开快捷菜单（设置、暂停显示 1 小时、退出）。
+[ListParagraph] {num5} 拖拽文件到岛上：自动展开为文件暂存架，松手后文件进入暂存。
+[ListParagraph] {num5} 滚轮：在展开态调整音量或切换活动。
+[ListParagraph] {num5} 全局快捷键：默认 Win+Alt+I 展开/收起；其余快捷键可自定义。
+[Heading2] 6. 功能需求
+优先级：P0 为 MVP 必须，P1 为 v1.0，P2 为后续版本。
+[Heading3] 6.1 基础框架（P0）
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="1062"/><w:gridCol w:w="1993"/><w:gridCol w:w="6304"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">编号
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">需求
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">验收标准
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-001
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">置顶悬浮窗口
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">在普通窗口、任务视图之上显示；不出现在 Alt+Tab 和任务栏
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-002
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">不抢焦点
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">点击岛不改变当前前台窗口的输入焦点（展开态输入框除外）
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-003
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">点击穿透
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">岛以外区域鼠标事件穿透到下层窗口
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-004
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">多显示器
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">可选择显示在哪个屏幕；支持“跟随鼠标所在屏幕”
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-005
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">混合 DPI
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">在 100%~300% 混合缩放的多屏之间拖动或切换时不模糊、不错位
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-006
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">位置设置
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">支持顶部居中、顶部偏移、屏幕底部，可微调 X/Y 偏移
+<w:tc><w:tcPr><w:tcW w:w="1062" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">F-007
+<w:tcPr><w:tcW w:w="1993" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">开机自启
+<w:tcPr><w:tcW w:w="6304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">可开关，使用注册表 Run 项或打包启动任务
+[Heading3] 6.2 媒体活动（P0）
+[ListParagraph] {num6} 通过系统媒体传输控制接口获取歌曲名、歌手、封面、播放状态和进度，无需逐个适配播放器。
+[ListParagraph] {num6} 紧凑态：左封面，右实时音频波形或播放中动效。
+[ListParagraph] {num6} 展开态：封面、歌名/歌手、进度条（可拖动）、上一首/播放暂停/下一首。
+[ListParagraph] {num6} 多个播放器同时存在时，取当前正在播放的会话；用户可在设置中指定偏好应用。
+[ListParagraph] {num6} 封面主色提取，用于展开态背景光晕。
+[ListParagraph] {num6} 歌词显示（P2）：依赖播放器是否提供，或接入第三方歌词源，需单独评估版权和稳定性。
+[Heading3] 6.3 音量与亮度 OSD（P0）
+[ListParagraph] {num7} 监听系统音量、静音状态、设备切换，以 P0 瞬时活动展示。
+[ListParagraph] {num7} 亮度变化监听（笔记本内置屏）。
+[ListParagraph] {num7} 支持设置是否同时屏蔽系统自带 OSD（见风险一节）。
+[ListParagraph] {num7} 外接耳机/蓝牙设备切换时显示设备名和电量（P1）。
+[Heading3] 6.4 计时器与番茄钟（P1）
+[ListParagraph] {num8} 倒计时、正计时、番茄钟三种模式，可通过快捷键或展开态创建。
+[ListParagraph] {num8} 紧凑态显示剩余时间的环形进度。
+[ListParagraph] {num8} 结束时以 P1 活动提示，可选择提示音。
+[ListParagraph] {num8} 多计时器并行（最多 3 个）。
+[Heading3] 6.5 文件暂存架（P1）
+[ListParagraph] {num9} 拖拽文件、文件夹、图片、文本到岛上即可暂存，展示缩略图和文件名。
+[ListParagraph] {num9} 从暂存架拖出到任意应用，行为与资源管理器拖拽一致（复制，按 Shift 为移动）。
+[ListParagraph] {num9} 暂存项只保存引用而不复制文件；源文件被移动或删除时标记为失效。
+[ListParagraph] {num9} 支持一键清空、固定某一项、重启后保留（可选）。
+[Heading3] 6.6 传输与进度类活动（P1）
+[ListParagraph] {num10} 文件复制/下载进度：通过监听指定目录的下载文件（.crdownload、.part 等）估算，或接入浏览器扩展（P2）。
+[ListParagraph] {num10} 对于无法准确获取进度的场景，宁可不显示，不显示错误信息。
+[Heading3] 6.7 会议与日程（P1）
+[ListParagraph] {num11} 读取 Outlook 或系统日历的下一个事件，开始前 5 分钟以 P1 提示，提供“加入会议”按钮（解析会议链接）。
+[ListParagraph] {num11} 检测摄像头/麦克风占用状态，显示“正在会议中”的指示（读取系统隐私使用记录）。
+[Heading3] 6.8 通知接入（P2）
+[ListParagraph] {num12} 通过系统通知监听接口读取通知，仅对用户白名单中的应用展示。
+[ListParagraph] {num12} 需要用户授权，且对打包方式（MSIX）有要求，先不放进 v1.0。
+[Heading3] 6.9 剪贴板与快速笔记（P2）
+[ListParagraph] {num13} 最近 N 条剪贴板历史，点击即粘贴；默认忽略来自密码管理器的内容。
+[ListParagraph] {num13} 快速笔记：一行输入，回车保存到本地 Markdown 文件。
+[Heading3] 6.10 插件系统（P2）
+[ListParagraph] {num14} 插件以独立进程或沙盒脚本运行，通过本地 IPC 向岛提交活动。
+[ListParagraph] {num14} 活动协议包含：id、标题、图标、优先级、紧凑态模板、展开态模板、事件回调。
+[ListParagraph] {num14} 首批官方示例：GitHub Actions 构建状态、天气、股票。
+[ListParagraph] {num14} 安全：插件需声明权限（网络、文件、剪贴板），安装时展示。
+[Heading2] 7. 全屏与勿扰策略
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="3763"/><w:gridCol w:w="5596"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="3763" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">场景
+<w:tcPr><w:tcW w:w="5596" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">行为
+<w:tc><w:tcPr><w:tcW w:w="3763" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">全屏游戏（独占或无边框）
+<w:tcPr><w:tcW w:w="5596" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">自动隐藏，仅 P1 紧急提示可选择性显示
+<w:tc><w:tcPr><w:tcW w:w="3763" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">演示模式（PowerPoint 放映）
+<w:tcPr><w:tcW w:w="5596" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">自动隐藏
+<w:tc><w:tcPr><w:tcW w:w="3763" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">系统专注助手/勿扰开启
+<w:tcPr><w:tcW w:w="5596" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">仅显示 P0 瞬时反馈，其余静默
+<w:tc><w:tcPr><w:tcW w:w="3763" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">屏幕共享中
+<w:tcPr><w:tcW w:w="5596" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">可选“屏幕共享时隐藏”，默认开启，避免泄露隐私信息
+<w:tc><w:tcPr><w:tcW w:w="3763" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">锁屏/登录界面
+<w:tcPr><w:tcW w:w="5596" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">不显示
+[Heading2] 8. 视觉与动画规范
+[Heading3] 8.1 视觉
+[ListParagraph] {num15} 形态：纯黑胶囊为默认主题（与深色壁纸融合），另提供亮色、跟随系统、毛玻璃（Acrylic）三种。
+[ListParagraph] {num15} 圆角：紧凑态完全圆角（半高），展开态约 28 px，圆角随尺寸连续变化。
+[ListParagraph] {num15} 字体：Segoe UI Variable，中文回落到微软雅黑 UI。
+[ListParagraph] {num15} 图标：优先使用 Fluent 图标。
+[ListParagraph] {num15} 阴影：轻微外阴影，避免悬浮感过重。
+[ListParagraph] {num15} 内容边距：展开态内边距 16 px，信息层级不超过三级。
+[Heading3] 8.2 动画
+[ListParagraph] {num16} 形变使用弹簧物理（质量、刚度、阻尼可调），默认略带回弹，避免线性或普通缓动曲线。
+[ListParagraph] {num16} 展开：宽度、高度、圆角同时插值，内容先模糊淡出再淡入，总时长约 350~450ms。
+[ListParagraph] {num16} 收起速度略快于展开，约 250~300ms。
+[ListParagraph] {num16} 动画可被打断：中途改变目标状态时从当前插值位置继续，而非重置。
+[ListParagraph] {num16} 提供“减少动画”选项，并遵循系统“显示动画”设置。
+[ListParagraph] {num16} 目标帧率：不低于 60 fps，在 120/144 Hz 屏幕上跟随刷新率。
+[Heading2] 9. 技术方案
+[Heading3] 9.1 技术选型
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="2178"/><w:gridCol w:w="4484"/><w:gridCol w:w="2697"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="2178" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">方案
+<w:tcPr><w:tcW w:w="4484" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">适合场景
+<w:tcPr><w:tcW w:w="2697" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">结论
+<w:tc><w:tcPr><w:tcW w:w="2178" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">WPF + .NET 8
+<w:tcPr><w:tcW w:w="4484" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">透明窗口、动画、调用 Win32 成熟
+<w:tcPr><w:tcW w:w="2697" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t xml:space="preserve">MVP 首选
+<w:tc><w:tcPr><w:tcW w:w="2178" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">Tauri 2 + 前端框架
+<w:tcPr><w:tcW w:w="4484" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">动画自由度最高，插件模板用前端写更方便
+<w:tcPr><w:tcW w:w="2697" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">备选，或作为插件渲染层
+<w:tc><w:tcPr><w:tcW w:w="2178" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">WinUI 3
+<w:tcPr><w:tcW w:w="4484" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">原生风格，但无边框透明窗口坑多
+<w:tcPr><w:tcW w:w="2697" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">暂不采用
+<w:tc><w:tcPr><w:tcW w:w="2178" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">Electron
+<w:tcPr><w:tcW w:w="4484" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">开发最快
+<w:tcPr><w:tcW w:w="2697" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">常驻内存过大，不采用
+[Heading3] 9.2 模块架构
+[ListParagraph] {num17} Shell（窗口层）：负责无边框透明窗口、置顶、点击穿透、DPI、多屏、全屏检测。
+[ListParagraph] {num17} Island Engine（状态与动画）：维护形态状态机、活动队列、优先级仲裁、弹簧动画驱动。
+[ListParagraph] {num17} Activity Providers（活动源）：媒体、音量、计时器、文件架、日历等，每个独立实现统一接口，可单独启用或关闭。
+[ListParagraph] {num17} Renderer（渲染层）：把活动模板渲染为紧凑态和展开态视图。
+[ListParagraph] {num17} Settings & Storage：本地 JSON 配置，暂存架和笔记保存在用户数据目录。
+[ListParagraph] {num17} Plugin Host（P2）：进程外加载和通信，崩溃不影响主程序。
+统一的活动源接口（示意）：
+[ListParagraph] {num18} Id、Priority、IsActive
+[ListParagraph] {num18} CompactView、ExpandedView
+[ListParagraph] {num18} OnActivated / OnDeactivated / OnAction(action)
+[ListParagraph] {num18} 通过事件通知引擎“活动开始、更新、结束”
+[Heading3] 9.3 关键技术点
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="3304"/><w:gridCol w:w="6055"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">问题
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">方案要点
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">不抢焦点、不进 Alt+Tab
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">窗口扩展样式设置 NOACTIVATE 与 TOOLWINDOW
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">点击穿透
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">收起态使用 TRANSPARENT 样式；或用窗口区域（Region）只保留胶囊命中区
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">媒体信息
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">WinRT 的全局系统媒体传输控制会话管理器
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">音量监听
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">Core Audio 的端点音量回调（IAudioEndpointVolumeCallback）
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">全屏检测
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">SHQueryUserNotificationState，结合前台窗口是否覆盖整个显示器
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">屏幕共享检测
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">检测常见会议软件进程与屏幕捕获 API 使用情况，保守判断
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">拖放暂存
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">OLE 拖放接口，处理 CF_HDROP 等格式，拖出时提供相同数据对象
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">DPI
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">Per-Monitor V2，窗口在屏幕间移动时重算尺寸
+<w:tc><w:tcPr><w:tcW w:w="3304" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">屏蔽系统音量 OSD
+<w:tcPr><w:tcW w:w="6055" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">非官方做法，需隐藏系统 OSD 窗口，存在随系统更新失效的风险
+[Heading3] 9.4 性能指标
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="3376"/><w:gridCol w:w="5983"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">指标
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">目标
+<w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">空闲 CPU 占用
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">平均低于 0.5%
+<w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">动画期间 CPU
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">低于 5%（单核）
+<w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">常驻内存
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">WPF 版本低于 80 MB
+<w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">启动到可用
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">低于 1.5 秒
+<w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">动画帧率
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">不低于 60 fps，无明显掉帧
+<w:tc><w:tcPr><w:tcW w:w="3376" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">隐藏时
+<w:tcPr><w:tcW w:w="5983" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">停止所有渲染与不必要的轮询
+[Heading2] 10. 设置项
+[ListParagraph] {num19} 通用：开机自启、显示屏幕、位置与偏移、语言、主题。
+[ListParagraph] {num19} 行为：悬停展开延迟、自动收起时间、空闲态显示方式、全屏/共享时策略。
+[ListParagraph] {num19} 模块：每个活动源独立开关与优先级微调。
+[ListParagraph] {num19} 动画：弹簧强度、时长、减少动画。
+[ListParagraph] {num19} 快捷键：展开/收起、暂停显示、创建计时器。
+[ListParagraph] {num19} 高级：诊断日志、重置配置、导入导出配置。
+[Heading2] 11. 隐私与安全
+[ListParagraph] {num20} 默认完全离线，不上传任何数据，不含遥测。如后续加入崩溃上报，必须为明确的可选项。
+[ListParagraph] {num20} 通知、剪贴板、日历等敏感数据只在本机内存中处理，不落盘（除用户主动保存的内容）。
+[ListParagraph] {num20} 插件权限显式声明，默认无网络和文件权限。
+[ListParagraph] {num20} 发布的安装包进行代码签名，减少杀毒软件误报。
+[Heading2] 12. 兼容性
+[ListParagraph] {num21} 系统：Windows 11 为主要目标，Windows 10 1903+ 作为兼容目标。
+[ListParagraph] {num21} 架构：x64 优先，ARM64 在 v1.0 后适配。
+[ListParagraph] {num21} 显示：支持多显示器、混合 DPI、竖屏。
+[ListParagraph] {num21} 与常见软件的冲突需持续测试：游戏平台（Steam、Epic）、远程桌面、会议软件、沉浸式编辑器等。
+[Heading2] 13. 版本规划
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="2479"/><w:gridCol w:w="5608"/><w:gridCol w:w="1272"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="2479" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">阶段
+<w:tcPr><w:tcW w:w="5608" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">内容
+<w:tcPr><w:tcW w:w="1272" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">预估周期
+<w:tc><w:tcPr><w:tcW w:w="2479" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">M0 原型
+<w:tcPr><w:tcW w:w="5608" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">胶囊窗口、点击穿透、弹簧动画、三种形态切换
+<w:tcPr><w:tcW w:w="1272" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">2 周
+<w:tc><w:tcPr><w:tcW w:w="2479" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">M1 MVP
+<w:tcPr><w:tcW w:w="5608" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">媒体活动、音量 OSD、全屏检测、基础设置、开机自启
+<w:tcPr><w:tcW w:w="1272" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">4 周
+<w:tc><w:tcPr><w:tcW w:w="2479" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">M2 内测（v0.9）
+<w:tcPr><w:tcW w:w="5608" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">计时器、文件暂存架、会议提醒、多屏与 DPI 打磨
+<w:tcPr><w:tcW w:w="1272" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">6 周
+<w:tc><w:tcPr><w:tcW w:w="2479" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">M3 正式版（v1.0）
+<w:tcPr><w:tcW w:w="5608" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">主题、快捷键、安装包与签名、自动更新
+<w:tcPr><w:tcW w:w="1272" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">4 周
+<w:tc><w:tcPr><w:tcW w:w="2479" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">M4 扩展
+<w:tcPr><w:tcW w:w="5608" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">插件系统、通知接入、剪贴板、歌词
+<w:tcPr><w:tcW w:w="1272" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">持续迭代
+[Heading2] 14. 成功指标
+[ListParagraph] {num22} 体验：内测用户中，动画流畅度评分不低于 4/5。
+[ListParagraph] {num22} 稳定性：连续运行 7 天无崩溃，内存增长小于 10%。
+[ListParagraph] {num22} 留存：安装后 30 天仍在运行的用户占比不低于 50%。
+[ListParagraph] {num22} 打扰度：因“影响使用”而被关闭或卸载的比例低于 5%。
+[ListParagraph] {num22} 生态（M4）：上线后 3 个月内出现不少于 10 个第三方插件。
+[Heading2] 15. 风险与对策
+<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="2799"/><w:gridCol w:w="1981"/><w:gridCol w:w="4580"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">风险
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">影响
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">对策
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">遮挡标题栏或标签页
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">影响日常使用，被认为是流氓软件
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">默认空闲态隐藏；位置可调；鼠标靠近应用标签区时自动让位
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">屏蔽系统 OSD 依赖非公开行为
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">系统更新后失效
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">作为可选功能，失效时降级为并存显示
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">全屏检测误判或漏判
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">打扰游戏或演示
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">多重判断，提供手动白名单和黑名单
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">混合 DPI 渲染错误
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">模糊、错位
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">早期纳入测试矩阵，每次迭代回归
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">通知读取权限和打包限制
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">功能无法交付
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">放入后期，单独验证 MSIX 分发
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">杀毒软件误报（全局钩子、置顶窗口）
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">安装率下降
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">代码签名，尽量避免低层钩子，公开源码或构建流程
+<w:tc><w:tcPr><w:tcW w:w="2799" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">同类产品竞争
+<w:tcPr><w:tcW w:w="1981" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">差异化不足
+<w:tcPr><w:tcW w:w="4580" w:type="dxa"/></w:tcPr><w:p><w:pPr></w:pPr><w:r><w:t xml:space="preserve">聚焦动画质感、低占用与插件生态
+[Heading2] 16. 待确认问题
+[ListParagraph] {num23} 是否开源？开源可加速插件生态和建立信任，但需要想清楚商业模式。
+[ListParagraph] {num23} 商业模式：完全免费、基础免费加高级主题收费，还是一次性买断？
+[ListParagraph] {num23} 是否首发只做 Windows 11，减少兼容成本？
+[ListParagraph] {num23} 歌词和封面是否接入第三方服务，如何处理版权与稳定性？
+[ListParagraph] {num23} 插件语言：优先 C# 还是 JavaScript？
+[ListParagraph] {num23} 默认空闲态是隐藏还是显示小胶囊，需要通过用户测试确定。
+[Heading2] 17. 下一步行动
+[ListParagraph] {num24} 搭建 M0 原型，重点验证窗口行为与弹簧动画手感。
+[ListParagraph] {num24} 邀请 5~10 位目标用户试用原型，收集对位置、打扰度的反馈。
+[ListParagraph] {num24} 根据反馈确定 MVP 范围并启动 M1。

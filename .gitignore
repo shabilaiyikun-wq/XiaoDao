@@ -1,0 +1,7 @@
+node_modules/
+*.log
+*.exe
+work/
+desktop/obj/
+selftest-report.json
+.DS_Store

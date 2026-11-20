@@ -1,0 +1,17 @@
+[    640 ms] pid=34004
+[   7653 ms] waited 7s for the island to settle
+[   7705 ms] island h=0xBC09C4 rect=210,0 500x256 ex=0x80028
+[   7717 ms] baseline visible windows=2 : 410AFC,BC09C4
+[   7723 ms] grid: x=12 y=10 共 120 点
+[  12390 ms] HIT (470,10) 新窗口 h=0x710BE4 170x362 at 470,10
+[  13671 ms] HIT (510,10) 新窗口 h=0x720BE4 170x362 at 510,10
+[  14955 ms] HIT (550,10) 新窗口 h=0x730BE4 170x362 at 550,10
+[  16233 ms] HIT (590,10) 新窗口 h=0x740BE4 170x362 at 590,10
+[  17510 ms] HIT (630,10) 新窗口 h=0x750BE4 170x362 at 630,10
+[  18775 ms] HIT (670,10) 新窗口 h=0x760BE4 170x362 at 670,10
+[  19436 ms] tested=12 found=6
+[  19441 ms] anchor=(470,10)
+[  20107 ms] reopen: new windows=1
+[  20204 ms]   FromHandle(770BE4) 79ms null=False
+[  20229 ms]   FindAll 24ms n=12
+[  20235 ms]   names=场景 | 外观 | 取材 | 形态 | 桌宠 |  | 截图  Alt+A | 允许截图与录屏捕捉 | 拖出后从暂存移除 | 把剪贴板里的文件暂存 | 复位位置 | 退出 WinIsland

@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WinIsland · 样式演示 v0.1</title>
+<link rel="stylesheet" href="winisland.css" />
+<style>
+  /* =====================================================================
+     演示台外壳（不属于产品，只是看样式的架子）
+     ===================================================================== */
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    background: #0b0c10;
+    color: #e8e9ee;
+    font-family: "Segoe UI Variable Display", "Segoe UI Variable Text",
+      "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* ---- 顶栏 ---- */
+  .topbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+    padding: 0 14px;
+    border-bottom: 1px solid #1c1e26;
+    background: #0e0f14;
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand b { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; }
+  .brand span { font-size: 11.5px; color: #6b707d; }
+  .topbar .spacer { flex: 1; }
+  .hint { font-size: 11.5px; color: #6b707d; }
+  .hint kbd {
+    font: inherit;
+    font-size: 11px;
+    padding: 1px 5px;
+    border: 1px solid #262a34;
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: #15171e;
+    color: #b9bdc9;
+  }
+
+  /* ---- 主体 ---- */
+  .layout { flex: 1; display: flex; min-height: 0; }
+  .stagewrap {
+    flex: 1;
+    min-width: 0;
+    padding: 16px;
+    display: flex;
+  }
+
+  /* ---- 模拟桌面 ---- */
+  .desk {
+    position: relative;
+    flex: 1;
+    min-height: 420px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #0a0d14;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+  .desk[data-wall="dark"] {
+    background:
+      radial-gradient(70% 55% at 12% 0%, #1e2f55 0%, transparent 62%),
+      radial-gradient(62% 55% at 88% 16%, #3d1f52 0%, transparent 66%),
+      radial-gradient(70% 60% at 50% 108%, #0c1b2c 0%, transparent 70%),
+      linear-gradient(160deg, #07080c, #0a0d14 55%, #05070a);
+  }
+  .desk[data-wall="light"] {
+    background:
+      radial-gradient(62% 55% at 8% 6%, #fff2df 0%, transparent 62%),
+      radial-gradient(64% 62% at 92% 24%, #d9e8ff 0%, transparent 66%),
+      radial-gradient(60% 55% at 40% 106%, #ffe6f0 0%, transparent 70%),
+      linear-gradient(160deg, #f6f8fc, #e9eff9 58%, #f8f5f0);
+  }
+  .desk[data-wall="busy"] {
+    background:
+      radial-gradient(42% 38% at 18% 22%, #ff5f6d 0%, transparent 62%),
+      radial-gradient(40% 36% at 68% 16%, #ffc371 0%, transparent 62%),
+      radial-gradient(46% 44% at 84% 76%, #24d0a0 0%, transparent 62%),
+      radial-gradient(44% 40% at 26% 84%, #4f8cff 0%, transparent 64%),
+      linear-gradient(140deg, #131a2b, #1d0f24);
+  }
+
+  /* 模拟一个最大化窗口 + 标签栏（测遮挡，§15 风险 1） */
+  .fakewin {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .fakewin__titlebar {
+    flex: none;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); }
+  .desk[data-wall="light"] .dots i { background: rgba(0, 0, 0, 0.14); }
+  .tab {
+    height: 26px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 7px;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .tab--active { color: rgba(255, 255, 255, 0.82); background: rgba(255, 255, 255, 0.12); }
+  .desk[data-wall="light"] .tab { color: rgba(0, 0, 0, 0.44); background: rgba(0, 0, 0, 0.05); }
+  .desk[data-wall="light"] .tab--active { color: rgba(0, 0, 0, 0.76); background: rgba(0, 0, 0, 0.09); }
+  .fakewin__body {
+    flex: 1;
+    margin: 0 12px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+  .desk[data-wall="light"] .fakewin__body {
+    background: rgba(255, 255, 255, 0.5);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+  }
+
+  /* 岛在桌面上的落点：顶部居中（§F-006 默认位置） */
+  .slot {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+  }
+
+  /* ---- 标尺（样式验收用） ---- */
+  .measure {
+    position: absolute;
+    pointer-events: none;
+    border: 1px dashed rgba(120, 200, 255, 0.9);
+    border-radius: 6px;
+    opacity: 0;
+    transition: opacity 140ms ease;
+  }
+  .measure[data-on="true"] { opacity: 1; }
+  .measure::before,
+  .measure::after {
+    position: absolute;
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-size: 10.5px;
+    line-height: 1.35;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    background: #0d2b45;
+    color: #cfe9ff;
+    box-shadow: 0 0 0 1px rgba(120, 200, 255, 0.5);
+  }
+  .measure::before {
+    content: attr(data-size);
+    left: 0;
+    bottom: calc(100% + 4px);
+  }
+  .measure::after {
+    content: attr(data-radius);
+    left: 0;
+    top: calc(100% + 4px);
+  }
+
+  /* ---- 右侧面板 ---- */
+  .panel {
+    flex: none;
+    width: 300px;
+    border-left: 1px solid #1c1e26;
+    background: #0e0f14;
+    overflow-y: auto;
+    padding: 14px 14px 28px;
+  }
+  .panel h3 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6b707d;
+  }
+  .group { margin-bottom: 18px; }
+  .seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 9px;
+    background: #15171e;
+    box-shadow: inset 0 0 0 1px #1e222b;
+  }
+  .seg button {
+    flex: 1 1 auto;
+    min-width: 52px;
+    height: 26px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    color: #a9aeba;
+    background: transparent;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .seg button:hover { color: #e8e9ee; background: #1c2029; }
+  .seg button[aria-pressed="true"] {
+    color: #0b0c10;
+    background: #dfe3ea;
+    font-weight: 600;
+  }
+  .field { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .field label { flex: none; width: 52px; font-size: 12px; color: #8d929e; }
+  .field input[type="range"] { flex: 1; accent-color: #8b7bff; }
+  .field output {
+    flex: none;
+    width: 42px;
+    text-align: right;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: #c9cdd6;
+  }
+  .readout {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 10px;
+    padding: 9px 10px;
+    border-radius: 9px;
+    background: #15171e;
+    box-shadow: inset 0 0 0 1px #1e222b;
+    font-size: 12px;
+  }
+  .readout dt { color: #7a808c; }
+  .readout dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: #dfe3ea;
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #a9aeba;
+    cursor: pointer;
+    padding: 4px 0;
+  }
+  .check input { accent-color: #8b7bff; }
+  .note {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: #6b707d;
+  }
+  .lane {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 9px;
+    background: #15171e;
+    box-shadow: inset 0 0 0 1px #1e222b;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><b>WinIsland</b><span>样式演示 v0.1 · 只做外观，不含功能</span></div>
+  <div class="spacer"></div>
+  <div class="hint">点岛切换 紧凑 ⇄ 展开 · 尺寸标注为 100% 缩放下的真实 DIP</div>
+</header>
+
+<div class="layout">
+  <div class="stagewrap">
+    <div class="desk" id="desk" data-wall="dark">
+      <div class="fakewin">
+        <div class="fakewin__titlebar">
+          <div class="dots"><i></i><i></i><i></i></div>
+          <div class="tab tab--active">项目文档</div>
+          <div class="tab">设计稿</div>
+          <div class="tab">+</div>
+        </div>
+        <div class="fakewin__body"></div>
+      </div>
+
+      <div class="slot" id="slot">
+        <div class="island" id="island" data-scene="media" data-state="compact" data-look="obsidian" data-motion="full">
+          <div class="island__acrylic"></div>
+          <div class="island__tint"></div>
+          <div class="island__grain"></div>
+          <div class="island__sheen"></div>
+          <div class="island__glow"></div>
+          <div class="island__stack">
+            <div class="island__view island__view--idle"></div>
+            <div class="island__view island__view--compact"></div>
+            <div class="island__view island__view--expanded"></div>
+          </div>
+          <div class="island__hairline"></div>
+        </div>
+        <div class="measure" id="measure" data-on="true"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="panel">
+    <div class="group">
+      <h3>形态</h3>
+      <div class="seg" id="segState">
+        <button type="button" data-v="idle">空闲</button>
+        <button type="button" data-v="compact">紧凑</button>
+        <button type="button" data-v="expanded">展开</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>活动类型</h3>
+      <div class="seg" id="segScene">
+        <button type="button" data-v="media">媒体</button>
+        <button type="button" data-v="timer">计时器</button>
+        <button type="button" data-v="volume">音量</button>
+        <button type="button" data-v="transfer">传输</button>
+        <button type="button" data-v="meeting">会议</button>
+        <button type="button" data-v="idle">无活动</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>主题</h3>
+      <div class="seg" id="segTheme">
+        <button type="button" data-v="obsidian">纯黑</button>
+        <button type="button" data-v="light">亮色</button>
+        <button type="button" data-v="auto">跟随系统</button>
+        <button type="button" data-v="acrylic">毛玻璃</button>
+      </div>
+      <div class="field" id="sysRow" hidden>
+        <label>系统</label>
+        <div class="seg" id="segSys" style="flex:1">
+          <button type="button" data-v="dark">深色</button>
+          <button type="button" data-v="light">浅色</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>壁纸</h3>
+      <div class="seg" id="segWall">
+        <button type="button" data-v="dark">深色</button>
+        <button type="button" data-v="light">浅色</button>
+        <button type="button" data-v="busy">花哨</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>弹簧手感</h3>
+      <div class="field">
+        <label>刚度</label>
+        <input type="range" id="rngK" min="120" max="560" step="2" value="250" />
+        <output id="outK">250</output>
+      </div>
+      <div class="field">
+        <label>阻尼</label>
+        <input type="range" id="rngC" min="8" max="48" step="1" value="24" />
+        <output id="outC">24</output>
+      </div>
+      <label class="check"><input type="checkbox" id="chkHover" />悬停展开（300ms 进 / 600ms 出）</label>
+      <label class="check"><input type="checkbox" id="chkReduce" />减少动画</label>
+      <label class="check"><input type="checkbox" id="chkMeasure" checked />显示尺寸标尺</label>
+    </div>
+
+    <div class="group">
+      <h3>实测</h3>
+      <dl class="readout">
+        <dt>尺寸</dt><dd id="roSize">—</dd>
+        <dt>圆角</dt><dd id="roRadius">—</dd>
+        <dt>形变耗时</dt><dd id="roDur">—</dd>
+        <dt>主题解析</dt><dd id="roLook">—</dd>
+      </dl>
+      <p class="note" style="margin-top:8px">形变耗时 = 位移稳定进入 1% 误差带的时间（弹簧尾巴会无限逼近目标，按「首次进入」量会得到非单调的假值）。§8.2 要求展开 350–450ms、收起 250–300ms。</p>
+    </div>
+  </aside>
+</div>
+
+<script src="winisland-scenes.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var island = document.getElementById("island");
+  var desk = document.getElementById("desk");
+  var measure = document.getElementById("measure");
+
+  var S = {
+    state: "compact",
+    scene: "media",
+    theme: "obsidian",
+    look: "obsidian",
+    sys: "dark",
+    wall: "dark",
+    motion: "full",
+    /* 标定值：scripts/tune.mjs 先解解析近似，再用 scripts/calib.mjs 在真实浏览器里量三遍取中位数。
+       当前 k=250 / ζ=0.77(c=24.3) → 实测展开 405ms、收起 275ms、回弹 2%。 */
+    k: 250,
+    c: 24,
+    /* 收起增益：刚度 ×1.75 / 阻尼 ×1.38（§8.2 收起略快于展开） */
+    kCollapse: 1.75,
+    cCollapse: 1.38,
+    hover: false,
+    measure: true
+  };
+
+  /* ------------------------------------------------------------ 弹簧积分器
+     半隐式欧拉 + 子步（1/240s）。目标可随时改写：位置与速度都保留，
+     因此中途反向时从当前插值位置继续（§8.2「动画可被打断」）。          */
+  function spring(v) {
+    return { v: v, vel: 0, target: v };
+  }
+  var sw = spring(226);
+  var sh = spring(36);
+
+  function integrate(s, dt, k, c) {
+    var steps = Math.max(1, Math.ceil(dt / (1 / 240)));
+    var h = dt / steps;
+    for (var i = 0; i < steps; i++) {
+      var a = -k * (s.v - s.target) - c * s.vel;
+      s.vel += a * h;
+      s.v += s.vel * h;
+    }
+  }
+  /* 弹簧尾巴以指数衰减，永远到不了「绝对 0」。
+     所以判定分两层：
+       - 视觉到位 = 位移达成 99%（这才是 §8.2 里说的「时长」）
+       - 物理收敛 = 0.4px 内且速度很低，此时直接落到目标，避免长尾空转 */
+  function withinPct(s, pct) {
+    var delta = Math.abs(s.target - s.from);
+    if (delta < 0.5) return true;
+    return Math.abs(s.v - s.target) <= Math.max(0.5, delta * pct);
+  }
+  function settled(s) {
+    return Math.abs(s.v - s.target) < 0.4 && Math.abs(s.vel) < 12;
+  }
+
+  /* ------------------------------------------------------------------ 测量 */
+  function sizeFor(scene, state) {
+    var table = WinIsland.SIZES[scene] || WinIsland.SIZES.idle;
+    return table[state] || table.idle;
+  }
+  function radiusFor(state, h) {
+    /* §8.1：紧凑/空闲 = 完全胶囊（半高）；展开 = 28px，随高度连续变化 */
+    return state === "expanded" ? Math.min(28, h / 2) : h / 2;
+  }
+
+  /* ------------------------------------------------------------ 状态 → 渲染 */
+  var rafId = 0;
+  var lastT = 0;
+  var morphStart = 0;
+  var morphing = false;
+  var lastAbove = 0;
+
+  function resolveLook() {
+    if (S.theme === "auto") return S.sys === "dark" ? "obsidian" : "light";
+    return S.theme;
+  }
+
+  function paint() {
+    var w = sw.v;
+    var h = sh.v;
+    island.style.width = w.toFixed(2) + "px";
+    island.style.height = h.toFixed(2) + "px";
+    var r = radiusFor(S.state, h);
+    island.style.borderRadius = r.toFixed(2) + "px";
+
+    measure.style.width = w.toFixed(2) + "px";
+    measure.style.height = h.toFixed(2) + "px";
+    measure.setAttribute("data-size", Math.round(w) + " × " + Math.round(h) + " DIP");
+    measure.setAttribute("data-radius", "r " + r.toFixed(1) + "px");
+
+    document.getElementById("roSize").textContent =
+      Math.round(w) + " × " + Math.round(h) + " px";
+    document.getElementById("roRadius").textContent = r.toFixed(1) + " px";
+  }
+
+  function loop(t) {
+    if (!lastT) lastT = t;
+    var dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+
+    var expanding = S.state === "expanded";
+    /* 收起略快于展开（§8.2）：同一组弹簧换增益，不从零开始 */
+    var k = expanding ? S.k : S.k * S.kCollapse;
+    var c = expanding ? S.c : S.c * S.cCollapse;
+
+    if (!settled(sw)) integrate(sw, dt, k, c);
+    if (!settled(sh)) integrate(sh, dt, k * 1.06, c * 1.02);
+
+    /* 「最后一次离开 1% 误差带」的时刻 = 真正的到位时间。
+       用「首次进入」会得到非单调结果：高速掠过目标点时瞬时撞线，之后会弹出去。 */
+    if (!(withinPct(sw, 0.01) && withinPct(sh, 0.01))) lastAbove = t;
+
+    /* 收敛后落位，避免长尾空转 */
+    if (settled(sw)) { sw.v = sw.target; sw.vel = 0; }
+    if (settled(sh)) { sh.v = sh.target; sh.vel = 0; }
+    paint();
+
+    if (settled(sw) && settled(sh)) {
+      if (morphing) {
+        var dur = lastAbove > morphStart ? Math.round(lastAbove - morphStart) : 0;
+        document.getElementById("roDur").textContent = dur + " ms";
+        document.getElementById("roDur").dataset.done = "1";
+      }
+      morphing = false;
+      rafId = 0;
+      lastT = 0;
+    } else {
+      rafId = requestAnimationFrame(loop);
+    }
+  }
+
+  function kick() {
+    if (!rafId) {
+      lastT = 0;
+      rafId = requestAnimationFrame(loop);
+    }
+  }
+
+  function setState(next, immediate) {
+    if (next === S.state && !immediate) return;
+    S.state = next;
+    island.setAttribute("data-state", next);
+
+    var pair = sizeFor(S.scene, next);
+    /* 记录起点：中断时 from 要跟着改，否则 99% 判定的分母会错 */
+    sw.from = sw.v;
+    sh.from = sh.v;
+    sw.target = pair[0];
+    sh.target = pair[1];
+
+    if (S.motion === "reduced") {
+      sw.v = sw.target; sw.vel = 0;
+      sh.v = sh.target; sh.vel = 0;
+      sw.from = sh.from = undefined;
+      paint();
+      document.getElementById("roDur").textContent = "—（减少动画）";
+      return syncSegs();
+    }
+    morphing = true;
+    lastAbove = 0;
+    morphStart = performance.now();
+    document.getElementById("roDur").dataset.done = "0";
+    kick();
+    syncSegs();
+  }
+
+  function setScene(scene) {
+    S.scene = scene;
+    island.setAttribute("data-scene", scene);
+    WinIsland.render(island, { art: "aurora", paused: false });
+    /* 场景可能是「无活动」，此时只有空闲态 */
+    if (scene === "idle") {
+      setState("idle");
+    } else if (S.state === "idle") {
+      setState("compact");
+    } else {
+      setState(S.state, true);
+    }
+    syncSegs();
+  }
+
+  function setTheme(theme) {
+    S.theme = theme;
+    S.look = resolveLook();
+    island.setAttribute("data-look", S.look);
+    document.getElementById("sysRow").hidden = theme !== "auto";
+    document.getElementById("roLook").textContent =
+      theme === "auto"
+        ? "跟随系统 → " + (S.look === "obsidian" ? "纯黑" : "亮色")
+        : { obsidian: "纯黑", light: "亮色", acrylic: "毛玻璃" }[theme];
+    syncSegs();
+  }
+
+  /* ---------------------------------------------------------------- 交互 */
+  function syncSegs() {
+    function mark(id, value) {
+      var host = document.getElementById(id);
+      Array.prototype.forEach.call(host.querySelectorAll("button"), function (b) {
+        b.setAttribute("aria-pressed", b.dataset.v === String(value) ? "true" : "false");
+      });
+    }
+    mark("segState", S.state);
+    mark("segScene", S.scene);
+    mark("segTheme", S.theme);
+    mark("segSys", S.sys);
+    mark("segWall", S.wall);
+  }
+
+  function bindSeg(id, fn) {
+    document.getElementById(id).addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (!b) return;
+      fn(b.dataset.v);
+    });
+  }
+  bindSeg("segState", function (v) { setState(v); });
+  bindSeg("segScene", function (v) { setScene(v); });
+  bindSeg("segTheme", function (v) { setTheme(v); });
+  bindSeg("segSys", function (v) { S.sys = v; setTheme(S.theme); });
+  bindSeg("segWall", function (v) {
+    S.wall = v;
+    desk.setAttribute("data-wall", v);
+    syncSegs();
+  });
+
+  document.getElementById("rngK").addEventListener("input", function (e) {
+    S.k = +e.target.value;
+    document.getElementById("outK").textContent = S.k;
+    kick();
+  });
+  document.getElementById("rngC").addEventListener("input", function (e) {
+    S.c = +e.target.value;
+    document.getElementById("outC").textContent = S.c;
+    kick();
+  });
+
+  document.getElementById("chkReduce").addEventListener("change", function (e) {
+    S.motion = e.target.checked ? "reduced" : "full";
+    island.setAttribute("data-motion", S.motion);
+  });
+  document.getElementById("chkMeasure").addEventListener("change", function (e) {
+    measure.setAttribute("data-on", e.target.checked ? "true" : "false");
+  });
+
+  /* 悬停展开 / 移开收起（§5.3 的延迟，用来实测手感；不是完整手势实现） */
+  var hoverTimer = 0;
+  document.getElementById("chkHover").addEventListener("change", function (e) {
+    S.hover = e.target.checked;
+    if (!S.hover) clearTimeout(hoverTimer);
+  });
+  function bindHover(el) {
+    el.addEventListener("mouseenter", function () {
+      if (!S.hover) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(function () {
+        if (S.state === "compact") setState("expanded");
+      }, 300);
+    });
+    el.addEventListener("mouseleave", function () {
+      if (!S.hover) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(function () {
+        if (S.state === "expanded") setState("compact");
+      }, 600);
+    });
+  }
+  bindHover(island);
+
+  /* 点岛切换（§5.3 单击展开或收起） */
+  island.addEventListener("click", function () {
+    if (S.state === "expanded") setState("compact");
+    else setState("expanded");
+  });
+
+  /* ---------------------------------------------------------------- 启动 */
+  WinIsland.render(island, { art: "aurora", paused: false });
+  var pair = sizeFor(S.scene, S.state);
+  sw.v = sw.target = pair[0];
+  sh.v = sh.target = pair[1];
+  setTheme("obsidian");
+  syncSegs();
+  paint();
+  document.getElementById("roDur").textContent = "—";
+
+  /* 供截图脚本使用 */
+  window.__winisland = {
+    set: function (opts) {
+      if (opts.theme) setTheme(opts.theme);
+      if (opts.sys) { S.sys = opts.sys; setTheme(S.theme); }
+      if (opts.wall) { S.wall = opts.wall; desk.setAttribute("data-wall", opts.wall); }
+      if (opts.scene) setScene(opts.scene);
+      if (opts.state) setState(opts.state, true);
+      if (opts.measure === false) measure.setAttribute("data-on", "false");
+      syncSegs();
+    },
+    settle: function () {
+      sw.v = sw.target; sw.vel = 0; sw.from = sw.target;
+      sh.v = sh.target; sh.vel = 0; sh.from = sh.target;
+      morphing = false;
+      paint();
+    },
+    /** 动画时长测量：直接驱动一次形变并等它报出耗时 */
+    measure: function (to) {
+      // 已经在目标形态时先瞬时落到另一端，否则 setState 会提前返回、量不到东西
+      if (S.state === to) {
+        var other = to === "expanded" ? "compact" : "expanded";
+        var p = sizeFor(S.scene, other);
+        S.state = other;
+        island.setAttribute("data-state", other);
+        sw.v = sw.target = p[0];
+        sh.v = sh.target = p[1];
+        morphing = false;
+        paint();
+      }
+      return new Promise(function (resolve) {
+        setState(to);
+        var el = document.getElementById("roDur");
+        var t0 = performance.now();
+        (function poll() {
+          if (el.dataset.done === "1" || performance.now() - t0 > 3000) {
+            resolve(parseInt(el.textContent, 10));
+          } else {
+            requestAnimationFrame(poll);
+          }
+        })();
+      });
+    },
+    /** 打断测试用：读当前宽度 */
+    width: function () {
+      return parseFloat(island.style.width);
+    },
+    /** 标定用：直接改弹簧参数 */
+    spring: function (o) {
+      if (o.k) S.k = o.k;
+      if (o.c) S.c = o.c;
+      if (o.kCollapse) S.kCollapse = o.kCollapse;
+      if (o.cCollapse) S.cCollapse = o.cCollapse;
+    }
+  };
+})();
+</script>
+</body>
+</html>

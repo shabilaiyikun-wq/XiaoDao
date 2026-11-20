@@ -1,0 +1,20 @@
+{
+  "name": "xiaodao",
+  "version": "0.1.0",
+  "private": true,
+  "description": "xiaodao —— Windows 灵动岛：原生 WPF 程序 + 网页样式层",
+  "scripts": {
+    "build": "cd /d desktop && build.cmd",
+    "run": "cd /d desktop && run.cmd",
+    "selftest": "cd /d desktop && WinIsland.exe --selftest --log=selftest.log",
+    "verify": "node scripts/verify.mjs",
+    "verify:pro": "node scripts/verify-pro.mjs",
+    "shots": "node scripts/shots.mjs",
+    "shots:pro": "node scripts/shots-pro.mjs",
+    "tune": "node scripts/tune.mjs",
+    "calib": "node scripts/calib.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}

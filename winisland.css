@@ -1,0 +1,779 @@
+/* =============================================================================
+   WinIsland · 视觉样式层 (v0.1)
+   -----------------------------------------------------------------------------
+   规格来源：Windows 灵动岛 产品文档 v0.1
+     §5.1 岛的三种形态（空闲 / 紧凑 / 展开，尺寸与连续形变）
+     §8.1 视觉（纯黑胶囊默认主题、圆角、字体、图标、阴影、内边距）
+     §8.2 动画（弹簧物理、展开 350~450ms、收起 250~300ms、可打断、减少动画）
+   本文件是纯样式层：不含业务逻辑，几何尺寸由外部（JS 弹簧 / 静态内联）写入
+   width / height / border-radius。给 WPF 移植时 1:1 对应上表令牌。
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   1. 令牌层 —— 全部可量化数值集中在这里
+   -------------------------------------------------------------------------- */
+.island {
+  /* -- 几何（DIP @100% 缩放，见 §5.1） -- */
+  --w-idle: 120px;
+  --h-idle: 28px;
+  --w-expanded: 400px;
+  --h-expanded: 140px;
+
+  /* 展开态圆角（§8.1）；紧凑/空闲态圆角恒等于半高 = 完全胶囊 */
+  --r-expanded: 28px;
+
+  /* -- 间距（§8.1 展开态内边距 16px） -- */
+  --pad: 16px;
+  --pad-compact-l: 6px;
+  --pad-compact-r: 10px;
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+
+  /* -- 字体（§8.1：Segoe UI Variable，中文回落微软雅黑 UI） -- */
+  --font: "Segoe UI Variable Display", "Segoe UI Variable Text",
+    "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
+    system-ui, -apple-system, sans-serif;
+
+  --fs-compact: 13px;   /* 紧凑态主信息 */
+  --fs-sub: 12px;       /* 次级信息 */
+  --fs-title: 15px;     /* 展开态标题 */
+  --fs-meta: 11px;      /* 时间轴 / 计量 */
+  --fs-num: 30px;       /* 计时器大数字 */
+  --fw-regular: 450;
+  --fw-medium: 550;
+  --fw-semi: 640;
+  --tracking: -0.1px;
+
+  /* -- 动效（§8.2；弹簧参数在 JS 里，这里只管内容淡入淡出） -- */
+  --dur-in: 220ms;
+  --dur-out: 120ms;
+  --delay-in: 70ms;     /* 内容先模糊淡出，再淡入 */
+  --ease-in: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --ease-out: cubic-bezier(0.4, 0, 0.6, 1);
+  --blur-in: 6px;
+  --blur-out: 4px;
+
+  /* -- 视觉（§8.1 轻微外阴影） -- */
+  --is-fill: #000;
+  --is-text: #f6f6f7;
+  --is-text-2: rgba(246, 246, 247, 0.64);
+  --is-text-3: rgba(246, 246, 247, 0.52);
+  --is-hairline: rgba(255, 255, 255, 0.09);
+  --is-track: rgba(255, 255, 255, 0.18);
+  --is-btn: rgba(255, 255, 255, 0.14);
+  --is-btn-hover: rgba(255, 255, 255, 0.22);
+  --is-btn-text: #fff;
+  --is-accent: #8b7bff;
+  --is-accent-on: #6d5bd0;
+  --is-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.62),
+               0 3px 10px -3px rgba(0, 0, 0, 0.36);
+  --sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.075),
+    rgba(255, 255, 255, 0) 46%
+  );
+  --glow-opacity: 0.3;
+}
+
+/* -----------------------------------------------------------------------------
+   2. 四种主题（纯黑 / 亮色 / 跟随系统 → data-look / 毛玻璃）
+      跟随系统由 JS 解析成 data-look，样式层只认 3 个 look。
+   -------------------------------------------------------------------------- */
+
+/* 2.1 纯黑（默认） */
+.island[data-look="obsidian"] {
+  --is-fill: #000;
+  --is-text: #f6f6f7;
+  --is-text-2: rgba(246, 246, 247, 0.64);
+  --is-text-3: rgba(246, 246, 247, 0.52);
+  --is-hairline: rgba(255, 255, 255, 0.09);
+  --is-track: rgba(255, 255, 255, 0.18);
+  --is-btn: rgba(255, 255, 255, 0.14);
+  --is-btn-text: #fff;
+  --glow-opacity: 0.3;
+}
+
+/* 2.2 亮色 */
+.island[data-look="light"] {
+  --is-fill: #fff;
+  --is-text: #16161a;
+  --is-text-2: rgba(22, 22, 26, 0.66);
+  --is-text-3: rgba(22, 22, 26, 0.6);
+  --is-hairline: rgba(0, 0, 0, 0.07);
+  --is-track: rgba(0, 0, 0, 0.12);
+  --is-btn: rgba(0, 0, 0, 0.06);
+  --is-btn-hover: rgba(0, 0, 0, 0.1);
+  --is-btn-text: #16161a;
+  --is-shadow: 0 12px 30px -12px rgba(15, 18, 26, 0.34),
+               0 3px 8px -3px rgba(15, 18, 26, 0.14);
+  --sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0) 40%
+  );
+  --glow-opacity: 0.14;
+}
+
+/* 2.3 毛玻璃 Acrylic
+   关键点：backdrop-filter 里带 brightness() 压暗底图（对应 WinUI 的 luminosity 层）。
+   少了这一层，浅色壁纸会把胶囊抬成中灰，白字对比度掉到 2.x:1。 */
+.island[data-look="acrylic"] {
+  --is-fill: rgba(16, 16, 20, 0.58);
+  --is-acrylic-dim: 0.62;
+  --is-text: #f7f7f8;
+  --is-text-2: rgba(247, 247, 248, 0.76);
+  --is-text-3: rgba(247, 247, 248, 0.62);
+  --is-hairline: rgba(255, 255, 255, 0.18);
+  --is-track: rgba(255, 255, 255, 0.22);
+  --is-btn: rgba(255, 255, 255, 0.18);
+  --is-btn-text: #fff;
+  --is-shadow: 0 14px 38px -10px rgba(0, 0, 0, 0.5),
+               0 3px 10px -3px rgba(0, 0, 0, 0.3);
+  --glow-opacity: 0.26;
+}
+
+/* -----------------------------------------------------------------------------
+   3. 岛本体 —— 一个形状，三层质感 + 一层内容
+   -------------------------------------------------------------------------- */
+.island {
+  position: relative;
+  display: block;
+  width: var(--w-idle);
+  height: var(--h-idle);
+  box-sizing: border-box;
+  border-radius: calc(var(--h-idle) / 2);
+  overflow: hidden;
+  isolation: isolate;
+  font-family: var(--font);
+  font-size: var(--fs-compact);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking);
+  color: var(--is-text);
+  box-shadow: var(--is-shadow);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  transform: translateZ(0);
+}
+
+/* 3.1 毛玻璃底：只有 acrylic 才启用（§8.1 毛玻璃主题） */
+.island__acrylic {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  display: none;
+  /* blur + 提饱和 + 压暗（压暗量见 --is-acrylic-dim，验收脚本按同一数值算对比度） */
+  -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(0.62);
+  backdrop-filter: blur(28px) saturate(190%) brightness(0.62);
+}
+.island[data-look="acrylic"] .island__acrylic {
+  display: block;
+}
+
+/* 3.2 色调层：黑胶囊 / 白胶囊的本体色 */
+.island__tint {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--is-fill);
+}
+
+/* 3.3 噪声：只在 acrylic 下叠，压住毛玻璃的色带 */
+.island__grain {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  display: none;
+  opacity: 0.032;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='128' height='128' filter='url(%23n)'/></svg>");
+  background-size: 128px 128px;
+}
+.island[data-look="acrylic"] .island__grain {
+  display: block;
+}
+
+/* 3.4 顶部高光：让纯黑不至于死板，但不破坏「纯黑」观感 */
+.island__sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--sheen);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* 3.5 一圈极细描边（浅色壁纸下保证轮廓） */
+.island__hairline {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--is-hairline);
+  pointer-events: none;
+}
+
+/* 3.6 封面主色光晕（§6.2），仅展开态 */
+.island__glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-in) var(--ease-in) var(--delay-in);
+  background:
+    radial-gradient(
+      120% 140% at 8% 0%,
+      color-mix(in oklab, var(--is-accent) 78%, transparent) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      100% 120% at 92% 100%,
+      color-mix(in oklab, var(--is-accent) 44%, transparent) 0%,
+      transparent 58%
+    );
+  mix-blend-mode: screen;
+  filter: blur(14px);
+}
+.island[data-state="expanded"] .island__glow {
+  opacity: var(--glow-opacity);
+}
+
+/* -----------------------------------------------------------------------------
+   4. 内容层 —— 三套视图叠在一个盒子里，随形态交叉淡入淡出（§8.2）
+   -------------------------------------------------------------------------- */
+.island__stack {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.island__view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  box-sizing: border-box;
+  opacity: 0;
+  filter: blur(var(--blur-out));
+  transform: scale(0.985);
+  transform-origin: center;
+  pointer-events: none;
+  /* 这里刻意不写 will-change。常驻的 will-change: transform/filter 会把这一层永久提升为
+     独立合成层，而独立层没有不透明背景，文字只能用灰度抗锯齿而不是 LCD 次像素——在透明
+     桌面窗口上这正是「玻璃/展开态文字发糊」的主因（fly-island 排查记录里删掉它才恢复正常）。
+     过渡进行时浏览器本来就会自己提升，动画结束后自动退回，所以不写只损失极端低端 GPU 上
+     第一帧就位的确定性，换来常态下文字的清晰度。 */
+  /* 离场：先模糊淡出，无延迟 */
+  transition: opacity var(--dur-out) var(--ease-out),
+    filter var(--dur-out) var(--ease-out),
+    transform var(--dur-out) var(--ease-out);
+}
+
+/* 上场：延迟 + 更长时长（§8.2「内容先模糊淡出再淡入」） */
+.island[data-state="idle"] .island__view--idle,
+.island[data-state="compact"] .island__view--compact,
+.island[data-state="expanded"] .island__view--expanded {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+  pointer-events: auto;
+  transition: opacity var(--dur-in) var(--ease-in) var(--delay-in),
+    filter var(--dur-in) var(--ease-in) var(--delay-in),
+    transform var(--dur-in) var(--ease-in) var(--delay-in);
+}
+
+/* 紧凑 / 空闲：单行左右布局（§5.1 左图标封面，右状态） */
+.island__view--idle,
+.island__view--compact {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-2);
+  padding: 0 var(--pad-compact-r) 0 var(--pad-compact-l);
+}
+
+/* 空闲态没有左右两栏，居中呼吸点即可 */
+.island__view--idle {
+  justify-content: center;
+  gap: 6px;
+}
+
+/* 展开：16px 内边距 + 居中（§8.1）；多子元素时列间距 12px */
+.island__view--expanded {
+  align-items: center;
+  gap: var(--gap-3);
+  padding: var(--pad);
+}
+
+/* 减少动画（§8.2）：几何由 JS 直接落位，内容只做瞬时切换 */
+.island[data-motion="reduced"] .island__view,
+.island[data-motion="reduced"] .island__glow {
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
+  filter: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .island:not([data-motion="full"]) .island__view,
+  .island:not([data-motion="full"]) .island__glow {
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+    filter: none;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   5. 场景原语 —— 所有活动共用同一套度量，只换内容
+   -------------------------------------------------------------------------- */
+.row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  gap: var(--gap-2);
+}
+
+/* 5.1 图标容器 / 封面 */
+.ico {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--is-text);
+}
+.ico svg {
+  display: block;
+}
+.ico--sm {
+  width: 16px;
+  height: 16px;
+}
+.ico--md {
+  width: 18px;
+  height: 18px;
+}
+
+/* 小图标磁贴（24×24）—— 用带字面用的强调色，保证白色图标的对比度 */
+.tile {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--is-accent-on);
+}
+.tile svg {
+  display: block;
+}
+
+/* 封面（紧凑 24 / 展开 72） */
+.cover {
+  flex: none;
+  position: relative;
+  overflow: hidden;
+  border-radius: 7px;
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.cover--sm {
+  width: 24px;
+  height: 24px;
+}
+.cover--lg {
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+/* 封面占位：用纯 CSS 渐变模拟专辑/影片封面（无外部图片依赖） */
+.cover[data-art="aurora"] {
+  background-image: radial-gradient(
+      120% 120% at 20% 10%,
+      #a99bff 0%,
+      transparent 55%
+    ),
+    radial-gradient(90% 90% at 85% 80%, #ff9bd2 0%, transparent 60%),
+    linear-gradient(160deg, #2b2270, #120d2e);
+}
+.cover[data-art="ember"] {
+  background-image: radial-gradient(
+      110% 110% at 25% 15%,
+      #ffd6a0 0%,
+      transparent 55%
+    ),
+    radial-gradient(90% 90% at 80% 85%, #ff7a59 0%, transparent 62%),
+    linear-gradient(160deg, #6a2f1c, #2a120c);
+}
+.cover[data-art="mint"] {
+  background-image: radial-gradient(
+      120% 120% at 25% 20%,
+      #b9ffe4 0%,
+      transparent 55%
+    ),
+    radial-gradient(90% 90% at 85% 80%, #4fd1c5 0%, transparent 62%),
+    linear-gradient(160deg, #0f4d4a, #06201f);
+}
+
+/* 5.2 文字层级（§8.1 信息层级不超过三级） */
+.t1 {
+  font-size: var(--fs-compact);
+  font-weight: var(--fw-semi);
+  line-height: 1.24;
+  color: var(--is-text);
+}
+.t-title {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-semi);
+  line-height: 1.22;
+  letter-spacing: -0.2px;
+  color: var(--is-text);
+}
+.t2 {
+  font-size: var(--fs-sub);
+  font-weight: var(--fw-regular);
+  line-height: 1.28;
+  color: var(--is-text-2);
+}
+.t3 {
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-regular);
+  line-height: 1.2;
+  color: var(--is-text-3);
+}
+.ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0;
+}
+.num--lg {
+  font-size: var(--fs-num);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+/* 5.3 实时音频波形（§6.2 紧凑态右侧） */
+.wave {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+.wave i {
+  display: block;
+  width: 2.5px;
+  border-radius: 1.5px;
+  background: currentColor;
+  transform-origin: center;
+  animation: is-wave 1.05s ease-in-out infinite;
+}
+.wave i:nth-child(1) {
+  height: 7px;
+  animation-delay: -0.5s;
+}
+.wave i:nth-child(2) {
+  height: 12px;
+  animation-delay: -0.2s;
+}
+.wave i:nth-child(3) {
+  height: 16px;
+  animation-delay: 0s;
+}
+.wave i:nth-child(4) {
+  height: 10px;
+  animation-delay: -0.35s;
+}
+.wave[data-paused="true"] i {
+  animation-play-state: paused;
+}
+@keyframes is-wave {
+  0%,
+  100% {
+    transform: scaleY(0.34);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* 5.4 进度条（§6.2 展开态 / §6.4 环形） */
+.progress {
+  width: 100%;
+}
+.track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--is-track);
+}
+.track__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--is-accent);
+}
+.track__knob {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+}
+.times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: var(--fs-meta);
+  color: var(--is-text-3);
+}
+
+/* 迷你条（紧凑态转移类） */
+.minibar {
+  flex: none;
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--is-track);
+  overflow: hidden;
+}
+.minibar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--is-accent);
+}
+
+/* 5.5 环形进度（§6.4 紧凑态显示剩余时间的环形进度） */
+.ring {
+  flex: none;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.ring svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+.ring__bg {
+  fill: none;
+  stroke: var(--is-track);
+}
+.ring__fg {
+  fill: none;
+  stroke: var(--is-accent);
+  stroke-linecap: round;
+}
+.ring--sm {
+  width: 20px;
+  height: 20px;
+}
+.ring--lg {
+  width: 96px;
+  height: 96px;
+}
+.ring__center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-meta);
+  color: var(--is-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 5.6 控件（§6.2 上一首 / 播放暂停 / 下一首） */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+}
+.ctl {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--is-text);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+.ctl:hover {
+  background: var(--is-btn);
+}
+.ctl:active {
+  transform: scale(0.94);
+}
+.ctl--primary {
+  width: 32px;
+  height: 32px;
+  color: var(--is-btn-text);
+  background: var(--is-btn);
+}
+.ctl--primary:hover {
+  background: var(--is-btn-hover);
+}
+
+/* 胶囊按钮（§6.7「加入会议」） */
+.pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: var(--fs-sub);
+  font-weight: var(--fw-medium);
+  color: var(--is-btn-text);
+  background: var(--is-btn);
+  cursor: pointer;
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+.pill:hover {
+  background: var(--is-btn-hover);
+}
+.pill:active {
+  transform: scale(0.97);
+}
+.pill--accent {
+  color: #fff;
+  background: var(--is-accent-on);
+}
+.pill--accent:hover {
+  background: color-mix(in oklab, var(--is-accent-on) 88%, #fff 12%);
+}
+
+/* 5.7 展开态通用排版块 */
+.stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: var(--gap-2);
+}
+.row--top {
+  align-items: flex-start;
+  gap: var(--gap-3);
+}
+.meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+  padding-top: 2px;
+}
+.row--end {
+  justify-content: flex-end;
+  gap: var(--gap-1);
+}
+.divider {
+  width: 100%;
+  height: 1px;
+  background: var(--is-hairline);
+}
+
+/* 5.8 传输列表行（§6.6） */
+.xfer {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  width: 100%;
+}
+.xfer__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.xfer__line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap-2);
+  align-items: baseline;
+}
+
+/* 5.9 空闲态：一个克制的呼吸点（§5.1 约 120×28 或隐藏） */
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--is-text-3);
+  animation: is-breathe 2.6s ease-in-out infinite;
+}
+@keyframes is-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.12);
+  }
+}
+.island[data-motion="reduced"] .dot,
+.island[data-motion="reduced"] .wave i {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .island:not([data-motion="full"]) .dot,
+  .island:not([data-motion="full"]) .wave i {
+    animation: none;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   6. 每场景的强调色
+      --is-accent     用于进度、光环、环形等「装饰面」，不承载文字
+      --is-accent-on  用于磁贴、实心按钮等「要压白字」的面，均实测 ≥4.5:1
+   -------------------------------------------------------------------------- */
+.island[data-scene="timer"] {
+  --is-accent: #34d399;
+  --is-accent-on: #047857;
+}
+.island[data-scene="transfer"] {
+  --is-accent: #60a5fa;
+  --is-accent-on: #2563eb;
+}
+.island[data-scene="meeting"] {
+  --is-accent: #fbbf24;
+  --is-accent-on: #b45309;
+}
+.island[data-scene="volume"] {
+  --is-accent: #e5e7eb;
+  --is-accent-on: #4b5563;
+}
+.island[data-scene="media"] {
+  --is-accent: #a99bff;
+  --is-accent-on: #6d5bd0;
+}
+.island[data-look="light"][data-scene="volume"] {
+  --is-accent: #4b5563;
+  --is-accent-on: #374151;
+}

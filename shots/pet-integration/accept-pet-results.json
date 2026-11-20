@@ -1,0 +1,117 @@
+﻿[
+    {
+        "Name":  "A1 进程存活",
+        "Ok":  true,
+        "Detail":  "pid=41560"
+    },
+    {
+        "Name":  "A2 桌宠窗口存在且只有一个",
+        "Ok":  true,
+        "Detail":  "1"
+    },
+    {
+        "Name":  "A3 岛窗口存在",
+        "Ok":  true,
+        "Detail":  "1"
+    },
+    {
+        "Name":  "A4 桌宠 WS_EX_NOACTIVATE",
+        "Ok":  true,
+        "Detail":  "ex=0x80800A8"
+    },
+    {
+        "Name":  "A5 桌宠 WS_EX_TOOLWINDOW（不进任务栏）",
+        "Ok":  true,
+        "Detail":  "ex=0x80800A8"
+    },
+    {
+        "Name":  "A6 桌宠默认点击穿透 WS_EX_TRANSPARENT",
+        "Ok":  true,
+        "Detail":  "ex=0x80800A8"
+    },
+    {
+        "Name":  "A7 桌宠窗口约 220 DIP",
+        "Ok":  true,
+        "Detail":  "220x220"
+    },
+    {
+        "Name":  "A8 启动不抢焦点（前台窗口未变）",
+        "Ok":  true,
+        "Detail":  "before=460272 after=460272"
+    },
+    {
+        "Name":  "A9 整屏截图",
+        "Ok":  true,
+        "Detail":  "E:\\xiaodao\\shots\\pet-integration\\A-coexist-island-pet.png"
+    },
+    {
+        "Name":  "B1 光标远离时保持穿透",
+        "Ok":  true,
+        "Detail":  "ex=0x80800A8"
+    },
+    {
+        "Name":  "B2 光标落在球上时穿透被解除",
+        "Ok":  true,
+        "Detail":  "ex=0x8080088"
+    },
+    {
+        "Name":  "C1 拖动改变桌宠位置",
+        "Ok":  true,
+        "Detail":  "from=(585,64) to=(681,100)"
+    },
+    {
+        "Name":  "C2 拖动结束后写入 pet.txt",
+        "Ok":  true,
+        "Detail":  "pet.txt=\u0027681.33;100\u0027"
+    },
+    {
+        "Name":  "C3 拖动不抢焦点",
+        "Ok":  true,
+        "Detail":  "fg=460272"
+    },
+    {
+        "Name":  "D1 关闭后无 WinIsland 进程",
+        "Ok":  true,
+        "Detail":  ""
+    },
+    {
+        "Name":  "D2 重启后桌宠位置恢复",
+        "Ok":  true,
+        "Detail":  "expect=(681,100) got=(681,100)"
+    },
+    {
+        "Name":  "D3 启动本身不写 pet 偏好",
+        "Ok":  true,
+        "Detail":  "ui.txt=\u0027scene=media;look=glass;art=aurora;capture=1;transferOut=0;\u0027"
+    },
+    {
+        "Name":  "D4 pet=0 时不自动开桌宠",
+        "Ok":  true,
+        "Detail":  "0"
+    },
+    {
+        "Name":  "D5 该次启动不改偏好",
+        "Ok":  true,
+        "Detail":  "pet=0"
+    },
+    {
+        "Name":  "E1 连续 3 次启停：每次一个桌宠、退出无残留",
+        "Ok":  true,
+        "Detail":  ""
+    },
+    {
+        "Name":  "F1 岛被外部关闭后进程退出",
+        "Ok":  true,
+        "Detail":  "exit=0"
+    },
+    {
+        "Name":  "F2 退出后没有残留 WinIsland 进程",
+        "Ok":  true,
+        "Detail":  ""
+    },
+    {
+        "Name":  "F3 退出后桌宠窗口已销毁",
+        "Ok":  true,
+        "Detail":  "hwnd=9374368"
+    }
+]
