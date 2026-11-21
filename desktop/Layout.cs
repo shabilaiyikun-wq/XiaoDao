@@ -157,8 +157,23 @@ namespace WinIsland
 
         static void OnTap(FrameworkElement el, Action a, string name)
         {
-            el.Tag = "act";
-            el.Cursor = System.Windows.Input.Cursors.Hand;
+            /* 按压回弹也从这里挂：OnTap 是「明确可点的岛内控件」的唯一入口，
+               于是「哪些东西有按压反馈」由这一处决定，不在十几个调用点各写一遍，
+               也不可能漏掉某个按钮、或者反过来把整座岛、拖放过程和桌宠算进去。
+
+               返回值不一定是 el 本身 —— Squish.Wrap 会给它套一层不变形的命中面，
+               变形只发生在里层元素上。所以下面所有处理程序都必须挂在返回值上，
+               挂在参数上就等于挂到了「不参与命中测试的那个元素」上，点击会静默失效。 */
+            SquishTarget target = Squish.Wrap(el, name);
+            FrameworkElement surface = target == null ? el : target.Surface;
+
+            surface.Tag = "act";
+            surface.Cursor = System.Windows.Input.Cursors.Hand;
+
+            /* 按下/松开/离开三个指针事件由 Squish.Wrap 自己接（它要抓鼠标捕获），
+               这里只负责「点了之后做什么」。按下反馈和下面的动作是同一个时刻，
+               所以不会被 300ms 防抖吞掉 —— 那管的是「动作只认一次」，
+               不是「这一次看起来不像被按过」。 */
 
             /* 同一个元素 300ms 内只认一次点击 —— 用时间防抖，不用 ClickCount。
 
@@ -173,7 +188,7 @@ namespace WinIsland
                时间防抖只关心「同一个元素、间隔多久」，既挡住了双击连开两个输入窗，
                也不会误伤旁边的另一个按钮。 */
             int lastMs = 0;
-            el.MouseLeftButtonDown += delegate(object s, System.Windows.Input.MouseButtonEventArgs ev)
+            surface.MouseLeftButtonDown += delegate(object s, System.Windows.Input.MouseButtonEventArgs ev)
             {
                 if (ev.ChangedButton != System.Windows.Input.MouseButton.Left) return;
 
@@ -883,8 +898,11 @@ namespace WinIsland
                 Ui.At(inner, tb, 22, 5);
 
                 int idx = i;
-                OnTap(row, delegate { if (act.CopyClip != null) act.CopyClip(idx); });
+                /* 先 At 再 OnTap：OnTap 会给元素套一层命中面（Squish.Wrap），
+                   套的时候要读它现在的父容器和 Canvas.Left/Top。顺序反过来，
+                   元素还没有父容器，就套不上命中面了（见 Squish.Wrap 的退路）。 */
                 Ui.At(list, row, 0, i * rowH);
+                OnTap(row, delegate { if (act.CopyClip != null) act.CopyClip(idx); });
             }
         }
 
@@ -991,8 +1009,9 @@ namespace WinIsland
                 }
 
                 int idx = i;
-                OnTap(row, delegate { if (act.ToggleTodo != null) act.ToggleTodo(idx); });
+                /* 同上：先落位，再套命中面 */
                 Ui.At(list, row, 0, i * rowH);
+                OnTap(row, delegate { if (act.ToggleTodo != null) act.ToggleTodo(idx); });
             }
         }
 

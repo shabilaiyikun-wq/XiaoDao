@@ -590,3 +590,343 @@ pitch= -asin(clamp(t.y, -0.92, 0.92))
    本次没有再测（触发源已从拖放换成层状态，这一项与本功能无关）。
 4. 岛在「拖出窗口后松手」时 `_dragIn` 会卡住（`drag leave = 0`，岛不回 idle）。
    既有问题，改它等于改文件接收状态机，本次不动。
+
+---
+
+# 附：层级形变与内容交接（MorphSurface 设计移植）
+
+本节记录「第一层 → 第二层 → 第三层」这条形变链路的改造。上游是 FluidKit 的
+`MorphSurface`（MIT，署名见仓库根目录 `THIRD-PARTY-NOTICES.md`）。
+
+## 为什么动它
+
+改造前，切层是「清空内容树 + 重建 + 从 0 淡入」：
+
+```csharp
+_content.Children.Clear();
+_content.Opacity = 0;
+DoubleAnimation fade = new DoubleAnimation(1, 240ms) { BeginTime = 55ms };
+_content.BeginAnimation(OpacityProperty, fade);
+_content.RenderTransform = new TranslateTransform(0, 6);   // 每次重建都换新的
+```
+
+三个硬伤，都只在**快速连续切层**时暴露：
+
+1. 每次切层都从**全透明**开始。展开到一半改收回时，画面会从当前状态跳回全透明
+   重来 —— 表现为闪一下。
+2. 每次重建都换一个新的 `TranslateTransform`，上一段的 6px 起跳被当场丢弃，
+   位移会重来一次 —— 表现为抖一下。
+3. 新旧内容之间没有交接，只有「先没了再有」；层越高、卡片信息越多，越像「页面重载」。
+
+## 搬了什么
+
+只搬三条机制，不搬上游的材质与运行时：
+
+1. **锚定边缘的连续形变。** 上游 `anchor: "center" | "top"`；本项目原本的锚是隐式的
+   （散在 `SyncPlacement` 里：横向岛心、纵向岛顶），现在收敛成 `IslandFrame.Island()`。
+   形变时这两条线不动，另外两条往外长 —— 断言得住，不靠肉眼。
+2. **主体与附属元素分别用合适的弹簧。** 主体沿用既有的 `K/C = 250/24`
+   （收起 `×1.75/×1.38`，纵向 `k×1.06 / c×1.02`）**逐位未改**；内容面另配一套更软的
+   （进场 `150/26`，ζ≈1.06 不过冲），退场更快（`340/37`）。
+3. **内容只做位移 + 透明度。** 两张面同时在树上，各自一条时间线；进场延迟 90ms
+   （等主体先长出一截），从 +8px 落到 0；退场落到 +5px。**任何时刻都不缩放** ——
+   文字、图标、桌宠因此不会被非等比拉伸。
+
+没有引入 React / motion：推进仍是 `Squircle.cs` 里的 `Spring`（半隐式欧拉，
+1/240s 定步长子步）。上游 `useMotionSprings` 只作为参数与语义参照。
+
+## 新增/改动的文件
+
+| 文件 | 性质 |
+| --- | --- |
+| `desktop/Morph.cs` | 新增。`MorphTuning` / `MorphFace` / `FaceBook` / `MorphBody` / `IslandFrame` / `PetLink` / `MorphFaceVisual`。纯逻辑，不建窗口，可单独编译。 |
+| `desktop/Scenes.cs` | 从 `Ui.cs` 搬出 `SceneDef` + `Scenes`（零 WPF 依赖），让验证程序与产品共用同一份层级尺寸表。 |
+| `desktop/IslandWindow.cs` | 接入：`_body`（形变）、`_faces`（内容）；`Rebuild` 不再清树；`OnFrame` 的收尾条件加上内容面。 |
+| `desktop/PetIsland.cs` | `PlacePet` 的摆位算术收进 `PetLink.Sample`（公式逐位未变），`PetEase`/`PetClamp01` 改为委托同一实现。 |
+| `desktop/verify/morph-tests.cs` + `.cmd` | 新增离线验证（117 条断言，不建窗口）。 |
+| `desktop/build.cmd` | 加入 `Scenes.cs` / `Morph.cs`。 |
+
+## 三条不变量
+
+1. **锚定边缘不动**：每帧 `IslandFrame.Island(ax, at, w, h)` 的 `Left + Width/2 == ax`
+   且 `Top == at`，误差 0（实测 `maxCx = 0`、`maxSym = 2.3e-13`，浮点噪声级）。
+2. **不跳变**：`Aim()` 只改 `From/Target`，**不碰当前值**（离线精确断言 `Value` 前后相等）；
+   每帧位移不超过解析上界 `(v₀ + 0.5·Δ·ω)·dt`（ζ≈0.76 的阶跃速度峰值是 `0.438·Δ·ω`，
+   0.5 留余量）。跳回起点会是 Δ 量级的一步，立刻越界。
+3. **内容不缩放**：`MorphFaceVisual.Apply` 只写 `Opacity` 与 `TranslateTransform.Y`；
+   退场那张 `IsHitTestVisible = false`（旧卡片上的按钮点不到），淡完 `Visibility.Hidden`。
+
+## 验证结果
+
+`desktop\verify\morph-tests.cmd`（离线，60Hz 步长，与产品同一份 `MorphBody`/`FaceBook`/`PetLink`）：
+
+```
+RESULT pass=117 fail=0
+```
+
+覆盖与要点：
+
+- **层级切换**（5 个场景各一组）：`idle → compact → expanded → compact → idle`，
+  每段都精确落在目标（±0.5），锚定边缘全程不动，无跳变，过冲 < 1%
+  （`250/24` 本来就是 ζ≈0.76 的欠阻尼，≈1% 回弹是既有手感）。
+- **快速反向**：展开 6 帧后改收回、收回 4 帧后再展开；`Aim` 前后 `Value` 完全相等
+  （精确断言），整段无跳变，最终收敛到 452x206 且 `Target == Value`。
+- **内容交叉淡入淡出**：延迟期内不亮（`t=0.08s` 时 `op=0`）→ 单调升到 1 且不过冲；
+  换内容时两脸同时在树（中段 `old=0.43 / new=0.02`）；旧脸退完交回、树上只剩一张。
+- **折返复用**：`A→B→A` 期间工厂调用次数不变（**不重建**），可见度从 0.63 接着走
+  （不重置为 0），B 退场后只剩 A；场上脸数上限 3。
+- **窗口尺寸**：每场景 `ExpW+48 × ExpH+50`（媒体 500x256），预留只在功能开启时叠加。
+- **桌宠位置**：`t=0` 在岛心、直径 16.8；交接点直径与球心连续（`16.8 → 16.8`、`97.6 vs 97.6`）；
+  终点正好隔 8 停在岛左（`46.8`）；岛贴左缘时换到右侧且落点仍隔 8；两侧都不够时挑宽的一侧。
+
+`WinIsland.exe --selftest`（真实渲染循环，`--no-pet`）：
+
+```
+STATE compact  112x38      STATE expanded 452x206
+MORPH expand   397.6ms     MORPH collapse 278.1ms
+MORPH reverse  turn=315.8  maxV=2238.5px/s   settled=True w=52
+FACES during swap max=2 sawPartialFront=True
+FACES after settle count=1 children=1 frontOp=1
+WINDOW 500x256 island=452x206
+```
+
+- `MORPH expand 397.6ms` 与解析值吻合：ζω = 12 s⁻¹，落到 1% 带的解析时间
+  `ln(100)/12 ≈ 384ms`。主体弹簧未改，所以这个数就是改动前的数。
+- `maxV=2238px/s` 是「带速度改向」的峰值，与解析上界一致；跳回起点会是万级。
+- `FACES after settle count=1 children=1` 证明树上没有残留旧脸。
+
+## 顺手修掉的两个既有问题
+
+1. **自检与自动状态机抢层级。** `Reconcile()` 按「悬停 / 在放歌」推断该停在哪层，
+   而自检是脚本在推层、鼠标又不在岛上 —— 两边抢同一个状态。实测症状：刚
+   `SetState("expanded")` 再等 settle，读回来是 `52x30`，而 `MORPH` 却记了 396ms。
+   修法：自检期间置 `_petProbeLock = true`（它本来就是「探针接管层状态」的闸）。
+   修好后 `STATE expanded` 稳定为 `452x206`。
+2. **`build.cmd` 的 `rem` 落在 csc 续行里。** 三行 `rem` 被当成了源文件名，编译直接失败；
+   更糟的是 cmd 会把剩余参数当独立命令执行，于是后面捕获到的 `%ERRORLEVEL%` 是 0，
+   脚本照样打印 `[ok] WinIsland.exe built` —— 失败被伪装成成功。已把注释移到 csc 之前，
+   并在文件里写明「整段参数列表里不许出现注释」。
+
+## 未覆盖的场景（如实记录）
+
+1. **像素级验证没做成。** `desktop\verify\live-morph.ps1` 在本机跑不通：它靠「岛体填充色 vs
+   桌面底色」的亮度差定位边界，`look=frost` 在这张壁纸上差值 < 40，9 次采样里 6 次
+   `not decidable`；而且它假设起始是紧凑 248px 的单段形变，与现在的实际路径
+   （idle 52 → 第二层 → 第三层）不符。它给出了一个可信的副产品：窗口实际尺寸正好是
+   `750x384` 设备像素 = `500x256` DIP，与 `IslandFrame.WindowW/H` 一致。
+   **形变的连续性证据来自进程内采样（`IslandW` 逐帧）与离线断言，不是像素。**
+2. **DPI 缩放只覆盖了 1.5。** 本机是 2560x1600 @150%。100% / 200% 下的落位与
+   模糊半径没有实测；`Morph.cs` 里没有与 DPI 相关的常量，但 `Apply()` 的阴影/模糊
+   走既有路径，未在其它 DPI 上回归。
+3. **玻璃裁剪的像素结果没有逐帧对照。** 形变中 `_host.Clip` 的超椭圆逐帧重建，
+   内容靠 `Clip` 裁掉超出部分；本次只保证「内容不缩放 + 不参与命中」，
+   没有逐帧抓像素确认裁切边缘与形变同步。
+4. **点击穿透 / 拖放 / 桌宠跟随未重新做在线回归。** 相关代码未改
+   （`OnHitTick`、`_dragIn`、`PetLinkTo` 都原样），层的尺寸与落点也没变，但这属于
+   「按代码路径保证」，不是本轮实测。`desktop\verify` 下既有的
+   `verify-input.ps1`、`pet-island.ps1` 等在线探针本轮未跑。
+5. **第三张脸（A→B→C 极快连切）的存在意义只做了数量上限断言**（≤3 且淘汰最淡的那张），
+   没有逐帧确认它不可见。理论上它已经淡到接近 0，但「肉眼是否看得出」没验证。
+6. **内容面的 `Live` 更新器在退场那张脸上被清空**（`DrainFaces` 里 `b.Live.Clear()`）。
+   如果将来有数据源依赖「退场中的旧卡片继续刷新」，会被这条静默打断 —— 当前没有这种用法。
+
+## 并发写入（本次会话的环境事实，如实记录）
+
+本次会话期间，**同一份工作树被另一个进程并行修改**：开工时 `desktop\` 下没有
+`Squish.cs` / `Glass.cs` / `LiquidGeometry.cs` / `LiquidTension.cs` / `LiquidPair.cs` /
+`LiquidProbe*.cs`，它们在会话进行中出现，同时 `Layout.cs` / `Theme.cs` / `Program.cs` /
+`IslandWindow.cs` / `build.cmd` 也被改写（FluidKit 的液态玻璃、弯折、Squish 那一路）。
+
+对本节所述改动的影响：
+
+1. 我改的 4 个共享文件里，有 **11 个 hunk 属于那一路**，已从 `work/morph-port.diff`
+   中剔除。识别规则是这些行出现 `_bend` / `_glass` / `Glass.Render` / `Squish.` /
+   `Liquid*` 标识；被剔除的 hunk 位置：
+   IslandWindow.cs 新文件行 53、248、251、457、630、1527、1540、1636、2013、2038、2059。
+2. 两边没有逻辑冲突：那一路是新增 `UpdateBend` / `_glass.Render`（折射层），
+   我是 `Rebuild` / `OnFrame` / 内容面。已确认 `Rebuild` 仍是唯一的内容构建入口，
+   `ApplyFaces()` 仍在 `Apply()` 里被调用，`_faces.Step` 仍在 `OnFrame` 里。
+3. `build.cmd` 我做了两处修改：把 `Scenes.cs` / `Morph.cs` / `Glass.cs` 加进源文件列表；
+   并把落在 csc 续行里的三行 `rem` 移到调用之前（那个缺陷会让编译失败却仍打印 `[ok]`）。
+4. `desktop/LICENSES/fluidkit-MIT.txt` 是那一路建的；根目录 `THIRD-PARTY-NOTICES.md`
+   改成了索引式，许可原文只保留一份，避免两份版权文本各说一套。
+
+# 附：控件按压回弹（useSquish 移植）
+
+本节记录岛内可点控件的「按下去略微压扁、松开由弹簧弹回」。上游是 FluidKit 的
+`useSquish`（MIT，`Copyright (c) 2026 Yousef Hindy`，原文见
+`desktop/LICENSES/fluidkit-MIT.txt`，逐文件映射见根目录 `THIRD-PARTY-NOTICES.md`）。
+
+## 只作用于明确可点的控件
+
+挂载点是 `Layout.OnTap(el, a, name)` —— 版面里 18 个可点控件的**唯一**入口。
+反馈因此在结构上就只可能出现在「明确声明过点击行为」的元素上：
+
+- 整座岛、拖动过程、桌宠都不经过 `OnTap`，所以它们天然没有这份反馈；
+- 反过来也不会有某个按钮被漏掉（不需要在十几个调用点各写一遍）。
+
+按下反馈和点击动作是**同一时刻**的两个独立分支：动作仍走既有的 300ms 防抖，
+反馈不受它影响 —— 防抖管的是「动作只认一次」，不是「这一次看起来不像被按过」。
+
+## 搬了什么
+
+1. **两个轴反比缩放。** 按下时横向 `×(1+intensity)`、纵向 `×1/(1+intensity)`，
+   两轴乘积恒为 1 —— 看上去像被按扁的软物，而不是整体变胖。实测 `X·Y = 0.99982`。
+2. **同一组弹簧负责按下和松开两个方向。** 回弹的**超调**就是「抖那一下」本身，
+   不另写一段 bounce 动画（上游注释明确说了这一点）。`k=550, c=30`，
+   ζ = 30/(2√550) = 0.6396，只超调一次。
+3. **幅度克制。** 上游默认 0.12（对一张 200px 的网页按钮是左右各 12px）；岛里的
+   按钮只有 20~36 DIP，照抄会抖得像坏了。取 `Intensity = 0.05`，再加一条绝对上限
+   `MaxGrowthPx = 4.0`：一行 430 DIP 的列表行按 5% 要左右各长 10.8px，那不是
+   「略微变宽」。宽度超过 80 DIP 的控件实际吃到的百分比就低于 5%
+   （400 DIP 的行是 0.01、增量正好 4px）。
+4. **减少动态效果时按下不动、松开强制归位。** 归位那一半**不受**开关保护 ——
+   按下之后才把开关打开，也绝不能冻在压扁状态（上游同样如此）。
+
+不搬的部分：React / Motion 运行时、键盘 Space/Enter 的按下态（岛是
+`ShowActivated=false` 的无焦点窗口，没有键盘焦点这回事，硬接只会是一条永不触发的路径）。
+
+## 命中面：一个必须存在的中间层
+
+WPF 的命中测试走渲染变换链。直接把 `ScaleTransform` 挂在按钮上，按下期间它的
+命中矩形会跟着横向放大、纵向缩小（34px 的按钮约 ±1.7px）—— 多指触摸的第二根手指
+就可能落进那道缝里，被当成「按住岛体拖动」。所以结构改成：
+
+```
+SquishPlate（Grid，透明背景，继承 Tag/Uid/Cursor）
+  └─ 原元素（IsHitTestVisible=false，RenderTransform=按压缩放）
+```
+
+命中面自动量到原元素**未缩放**的尺寸，于是布局尺寸、`Canvas.Left/Top`、变形中心
+全部不变；元素被 `Visibility.Collapsed` 时命中面自动变 0×0，「清理丢失」那类运行时
+折叠的按钮不会留一块隐形命中区。
+
+`Tag="act"` 与 `Uid="del"` 必须跟到命中面上：`IslandWindow.IsActionHit` 靠前者决定
+「按住按钮不拖窗口」，`Layout.IsDel` 靠后者避免把中转站的移除键当成拖出起点。
+原元素退出命中测试后，这两个标记要是没跟过来，就会静默地变成「点按钮把窗口拖走」
+和「点移除键触发拖放」。
+
+## 为什么用解析解 + 关键帧，而不是 `Squircle.cs` 的 `Spring`
+
+这一路是唯一**不**走 `Spring` 逐帧积分的动画，原因有两条：
+
+1. **借不上岛体的帧循环。** `OnFrame` 的收尾条件是「全都 settled 就摘掉
+   `CompositionTarget.Rendering`」。按压回弹按住不放时会收敛，循环随即停下，
+   之后松开就没人再喂时间了。
+2. **自己订阅 `Rendering` 不行。** 那是静态事件，多一个订阅方就多一处「关窗后把
+   窗口钉住」的漏点（§10.7 记的就是这个事故）。
+
+所以改成把位移算成关键帧交给 WPF 的动画时钟 —— 这正是 `Ui.cs` 里
+`Rhythm` / `Wave` / `Breathe` / `Orb` 已经在用的写法。好处一个不少：不新增帧循环、
+不订阅静态事件、播完自己停；而且轨迹是算出来的，验证时可以直接对模型断言。
+
+解析解（ζ<1，从 `x0`、速度 `v0` 走向 `target`）：
+
+```
+u(t) = e^(-a·t)·[u₀·cos(ω_d·t) + ((v₀ + a·u₀)/ω_d)·sin(ω_d·t)]，  u = x - target
+a = c/2 = 15，  ω_d = √(k - a²) = √325 = 18.0278
+```
+
+60Hz 取样 25 个关键帧（0.40s）。WPF 本来就是按帧取值、帧间线性插值，所以这串关键帧
+和逐帧积分得到的是同一条曲线。`e^(-15×0.40) = 0.0025`，残差不到幅度的 0.3%
+（34px 的按钮上约 0.004px），收尾那一下落到目标值看不出来。
+
+## 三条不变量
+
+1. **布局与命中区域不变。** 按下期间 `ActualWidth/Height` 前后相等、命中面
+   `RenderSize` 不变、变形中心位移 < 0.01 DIP；按下中间那一帧命中面四角 + 中心
+   五点全部仍命中的是命中面自己（5/5）。
+2. **不跳变。** 重定向时位置取自渲染时钟（`ScaleX` 的当前生效值），速度取自解析模型，
+   于是快速连点是接着上一段的速度走的。40ms 周期连点 6 次，相邻采样最大位移
+   `0.028`，全程无 NaN，结束后精确 `1.00000`。
+3. **一定回到 1，且还原别人的变换。** 松开弹簧最终精确为 `1.00000`（不是 0.9999），
+   并把我那一层从 `RenderTransform` 上摘掉。元素**本来**挂着的变换（液面那一套用
+   的是 `MatrixTransform`）在按下时被组合进 `TransformGroup`，松开时原样还回去 ——
+   只在「现在挂着的还是我写的那层」时才还原，别人中途接手过就不动它。
+   缩放中心用 `ScaleTransform.CenterX/CenterY`，不碰 `RenderTransformOrigin`
+   （那个属性是元素级共享的，改了等于悄悄改了别人的图形）。
+
+## 新增/改动的文件
+
+| 文件 | 性质 |
+| --- | --- |
+| `desktop/Squish.cs` | 新增。`SquishAxis` / `SquishTarget` / `SquishPlate` / `Squish`。弹簧解析解 + 关键帧、命中面、取消路径、减少动态效果判定、埋点。文件末尾带 MIT 全文与上游出处。 |
+| `desktop/Layout.cs` | `OnTap` 里套命中面并把三个指针事件改挂到 `surface`；两处 `Ui.At` / `OnTap` 顺序对调（先落位再套命中面）。 |
+| `desktop/build.cmd` | 加入 `Squish.cs`。 |
+| `notes/probes/probe-squish.cs` + `build-probe-squish.cmd` | 新增。46 条断言，开真窗口、跑真 `Layout.Build`、投真路由事件；另有 `render` / `centers` 两个模式给逐位对比和端到端点击用。 |
+| `desktop/verify/verify-squish.ps1` | 新增。启动真应用、`SendInput` 真点击、按日志断言。 |
+
+`desktop/IslandWindow.cs` **没有**改动：这一路不需要岛体的帧循环、不需要
+`StartAnimating`、也不需要窗口级轮询（见上一节的两条理由）。取消路径全部由
+`Squish` 自己收：`MouseLeftButtonUp` / `MouseLeave` / `LostMouseCapture`（按下时
+`CaptureMouse`，所以「在按钮外面松手」「弹 UAC」「切桌面」「元素被移出树」都会
+收到它）/ 窗口 `PreviewMouseUp` / 窗口 `Closed` / `Forget`。
+
+## 验证结果
+
+```
+desktop\build.cmd                     -> [ok] WinIsland.exe built
+notes\probes\build-probe-squish.cmd   -> ALL PASS   (ok=46  fail=0)
+desktop\verify\verify-squish.ps1      -> RESULT fail=0
+```
+
+三条关键实测值：
+
+```
+按下     amp=0.0500  peakX=1.05359（模型上限 1.05866）  X·Y=0.99982
+松开     minX=0.99641  超调比 0.07178（模型 0.07324）    终点 1.00000
+静止帧   before.png / after.png  SHA256 相同 (E5FA4347…)，14463 字节
+```
+
+静止帧逐位相等这一项是「没按的时候画面一点没变」的证据：同一份源码只把
+`OnTap` 里的 `Squish.Wrap` 换回原来的写法渲染一次、带着它再渲染一次，两张
+484×266 的 PNG 哈希相同。`ActualWidth/Height` 前后相等则排除了「布局尺寸被
+反馈改掉」。
+
+端到端那三条（真鼠标、真事件、真日志）：
+
+```
+   ok   a real mouse press logs 'squish press'
+   ok   a real mouse release logs 'squish release'
+   ok   amplitude is restrained (amp=0.0500, target 'timer-plus')
+   ok   the click action still fires (tap logged)
+   ok   with reduce-motion forced, the press is suppressed
+   ok   the click still works with reduce-motion on
+```
+
+## 踩过的坑（供后来者）
+
+1. **`RaiseEvent` 的参数类型必须和委托类型对上。** `MouseLeftButtonDown/Up` 的委托是
+   `MouseButtonEventHandler`，拿 `MouseEventArgs` 去 `RaiseEvent` 会抛
+   `InvalidCastException`。探针自己踩的，产品代码没有这个问题。
+2. **探针的等待必须长于动画。** 松开的弹簧是 0.40s，只等 220ms 就断言「变换已还原」
+   会必然失败。同类问题还有：`Forget()` 会清空目标名单，所以每一节都得重建卡片，
+   否则后面的 `Find` 全是 null。
+3. **`RenderTransform` 在元素上原本就可能有东西。** 一开始直接赋值 `ScaleTransform`，
+   松开时置 `null` —— 这会把液面那一套的 `MatrixTransform` 吃掉。现在按下时存
+   `Original`、松开时按引用比对后还原。
+4. **`RenderTransformOrigin` 不能动。** 原本想用 `(0.5,0.5)` 把缩放中心挪到元素中心，
+   但那个属性是元素级共享的，元素上已有的变换也在吃它。改用
+   `ScaleTransform.CenterX/CenterY`，只影响自己这一层。
+
+## 未覆盖的场景（如实记录）
+
+1. **分页圆点的反馈看不见。** 点圆点会 `SetState` → `Rebuild` → `Squish.Forget()`，
+   目标当场被丢掉，所以那一下看不到回弹。同理所有「点完就整层重建」的按钮
+   （圆点是唯一一类）。放大缩小按钮、番茄钟按钮不受影响（只跑 `RefreshNow()`）。
+   20px 的命中面本身也只产生亚像素形变（可见的圆点只有 5~7px）。
+2. **多指 / 触摸穿透没有实测。** 加命中面是为了守住「命中区域不变」，并用
+   `InputHitTest` 在按下中间那一帧验了四角与中心；但真机上「一根手指按住按钮、
+   另一根在岛上拖」这种并发手势没做在线回归（本机是鼠标环境）。
+3. **DPI 只覆盖了 1.5。** 端到端与几何断言都在 2560×1600 @150% 下跑，
+   100% / 200% 未回归。
+4. **减少动态效果只验了强制开 / 强制关两条路径**（`XIAODAO_SQUISH_MOTION`
+   与 `OverrideReduced`），没有在真的改 Windows「动画效果」开关的机器上验；
+   `SPI_GETCLIENTAREAANIMATION` 失败时退回 `SystemParameters.ClientAreaAnimation`
+   那一支也没构造出来跑过。
+5. **`Wrap` 的 fallback 分支（元素还没有父容器）没有任何调用点覆盖**，只是留了
+   一条日志防止以后有人把 `OnTap` 写到 `Ui.At` 之前时静默失效 —— 那行日志本身
+   也没被触发过。
+6. **`THIRD-PARTY-NOTICES.md` 里「所有时间线推进都用既有的 Spring」这句话，
+   对 `desktop/Squish.cs` 是例外**（原因见上）。那一份是另一路在维护的索引式文件，
+   本路没有改它，只在这里标注差异。

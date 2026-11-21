@@ -309,20 +309,18 @@ namespace WinIsland
             get { return _state == "idle" ? 0.0 : PetLinkTotal; }
         }
 
+        /* 缓动与夹取只有一份实现，在 PetLink 里（时间线摆位也要用它，两边各写
+           一份迟早会不一致）。这里保留这两个名字，是因为自检和探针在引用它们。 */
         static double PetEase(double u)
         {
             /* 起步慢、收尾更慢：球是「长出来」的，不是弹出来的。
                smoothstep 两端一阶导为 0，接上淡出那一段不会打勾。 */
-            if (u <= 0) return 0;
-            if (u >= 1) return 1;
-            return u * u * (3 - 2 * u);
+            return PetLink.Ease(u);
         }
 
         static double PetClamp01(double v)
         {
-            if (v < 0) return 0;
-            if (v > 1) return 1;
-            return v;
+            return PetLink.Clamp01(v);
         }
 
         /* ------------------------------------------------------------ 摆位 */
@@ -349,56 +347,18 @@ namespace WinIsland
 
             double d1 = IslandPetDockDiameter;
             double d2 = d1 * PetGrow;
-            double dockCx = ix + w / 2;
-            double dockCy = iy + h / 2;
 
-            /* 停靠点：岛旁，**优先左边**。
-               
-               球从岛体左侧出来，往左移出去。左侧放不下时（岛贴近屏幕左缘，
-               窗口的左边距被压没了）才退到右边，别让球被窗口边缘切掉。
-               两侧都不够时取宽的一侧 —— 窗口预留本应保证走不到这一步。 */
-            double r2 = d2 / 2;
-            double need = PetGap + d2;
-            double roomRight = Width - (ix + w);
-            double roomLeft = ix;
-            if (roomLeft >= need) _petSide = -1;
-            else if (roomRight >= need) _petSide = 1;
-            else _petSide = roomRight >= roomLeft ? 1 : -1;
-
-            double restCx = _petSide > 0 ? ix + w + PetGap + r2 : ix - PetGap - r2;
-            double restCy = iy + h / 2;
-
-            /* 时间线拆两段：
-                 0 → PetFadeSec            还在岛内那一格，淡出、缩一点
-                 PetFadeSec → PetLinkTotal 在岛下那一层，从岛心移到岛旁、长到两倍 */
-            double fade = PetClamp01(_petT / PetFadeSec);
-            double run = PetClamp01((_petT - PetFadeSec) / PetRunSec);
-
-            bool inDock = _petT < PetFadeSec;
-            double dia, cx, cy, opacity;
-
-            if (inDock)
-            {
-                cx = dockCx;
-                cy = dockCy;
-                /* 这里**不能**再缩小。曾经写的是 dia = d1*(1-0.22*fade)，
-                   于是岛内那颗淡出到 0 时只有 78%（13.1dip），而岛下那颗一接手
-                   就是整尺寸 16.8dip —— 直径在换层那一帧硬跳 3.7dip。
-                   因为那一刻两边都不可见（一颗透明度 0、一颗整颗埋在岛体轮廓里），
-                   肉眼看不出来，但这是一条真实的不连续：只要以后有人把接手点
-                   挪出岛体轮廓，它立刻会变成一个可见的跳动。改成只淡出不缩，
-                   直径就从头到尾连续（16.8 → 33.6）。 */
-                dia = d1;
-                opacity = 1.0 - fade;
-            }
-            else
-            {
-                double e = PetEase(run);
-                cx = dockCx + (restCx - dockCx) * e;
-                cy = dockCy + (restCy - dockCy) * e;
-                dia = d1 + (d2 - d1) * e;
-                opacity = 1.0;
-            }
+            /* 时间线上的姿态（球心 / 球径 / 不透明度 / 槽位 / 停靠侧）是一段纯算术，
+               搬进 PetLink.Sample —— 这样「换层时球会不会跳」在窗口之外也能断言，
+               不用靠抓像素猜。公式与搬运前逐位相同，只是换了位置。 */
+            PetPose pose = PetLink.Sample(_petT, PetFadeSec, PetRunSec,
+                                          w, h, ix, iy, Width, d1, d2, PetGap);
+            _petSide = pose.Side;
+            bool inDock = pose.InDock;
+            double dia = pose.Dia;
+            double cx = pose.Cx;
+            double cy = pose.Cy;
+            double opacity = pose.Opacity;
 
             SetPetSlot(!inDock);
 
@@ -435,7 +395,7 @@ namespace WinIsland
             if (_petTraceOn && _petTrace.Count < 4096)
             {
                 _petTrace.Add(new double[] {
-                    _petT, dia, cx, cy, opacity, inDock ? 0 : 1, dockCx, w });
+                    _petT, dia, cx, cy, opacity, inDock ? 0 : 1, ix + w / 2, w });
             }
         }
 

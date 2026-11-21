@@ -59,6 +59,15 @@ for %%F in (AnimationCore.cs PetGaze.cs PetClips.cs ReferenceClips.cs PetShape.c
 rem /resource: embeds the 28 reference clip recipes as WinIsland.grok-clips.json.
 rem ReferenceClips reads that exact name out of the assembly manifest, so it has
 rem to stay identical in both build scripts.
+rem Liquid neck prototype (isolated; only reachable via --liquid-probe).
+rem LiquidProbeMain.cs is deliberately NOT listed -- it declares its own Main
+rem and is compiled only by build-liquid.cmd into LiquidProbe.exe.
+rem
+rem NOTE: these comments must stay ABOVE the csc line. A rem inside the
+rem argument continuation is read by csc as an extra source file name, which
+rem aborts the compile -- and because cmd then runs the remaining arguments as
+rem separate commands, the %ERRORLEVEL% captured afterwards is 0, so the script
+rem still prints [ok]. Keep the whole argument list comment-free.
 "%CSC%" /nologo /target:winexe /platform:x64 /optimize+ /out:WinIsland.exe ^
   /codepage:65001 ^
   /r:"%WPF%\PresentationFramework.dll" ^
@@ -76,7 +85,11 @@ rem to stay identical in both build scripts.
   /resource:"%PET%\grok-clips.json",WinIsland.grok-clips.json ^
   Native.cs ^
   Squircle.cs ^
+  Scenes.cs ^
+  Morph.cs ^
+  Squish.cs ^
   Theme.cs ^
+  Glass.cs ^
   Ui.cs ^
   Data.cs ^
   Layout.cs ^
@@ -88,6 +101,10 @@ rem to stay identical in both build scripts.
   Notify.cs ^
   Input.cs ^
   Shot.cs ^
+  LiquidPair.cs ^
+  LiquidGeometry.cs ^
+  LiquidTension.cs ^
+  LiquidProbe.cs ^
   "%PET%\AnimationCore.cs" ^
   "%PET%\PetGaze.cs" ^
   "%PET%\PetClips.cs" ^

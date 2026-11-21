@@ -19,6 +19,16 @@ namespace WinIsland
         public Color TintBottom;
         public bool Refract;         // 真实采样桌面
         public Color RefractWash;    // 压在采样之上的冷色/暗色
+
+        /* 玻璃边缘折射（只有 glass 那套给非零值，其余外观全 0 = 一个像素都不变）。
+           三项都按 DIP 记，换分辨率不用改数值：
+             Bend      折射带宽度（从岛边往里多少 DIP 还在弯折背景）
+             BendKick  位移强度（岛边处的最大位移 = 一半）
+             BendSplit RGB 色散（R 与 B 通道的最大位移差） */
+        public double Bend;
+        public double BendKick;
+        public double BendSplit;
+
         public double Grain;         // 颗粒不透明度
         public double Edge;          // 边缘环强度
         public double Spec;          // 指针镜面强度
@@ -102,6 +112,16 @@ namespace WinIsland
             l.TintBottom = A("#000000", 0.14);
             l.Refract = true;
             l.RefractWash = A("#0E1016", 0.44);
+            /* 折射参数按岛体实际尺寸定：展开态 452x206，半高 103 ——
+               26 DIP 的带子约占高度的 1/8，视觉上正好是「一圈厚玻璃」，
+               再宽就从边缘效果变成整个岛都在变形了。
+               21 DIP 的位移强度 = 岛边最多把背景拉进来 10.5 DIP，
+               比基底那条 16 DIP 的模糊半径略小，弯折看得出来但不会错位。
+               2.6 DIP 的色散在这个尺寸上是「仔细看才有」的色边，
+               照着参考仓库默认 cab=2（CSS px）量级给。 */
+            l.Bend = 26;
+            l.BendKick = 21;
+            l.BendSplit = 2.6;
             l.Grain = 0.050;
             l.Edge = 1.0;
             l.Spec = 1.0;

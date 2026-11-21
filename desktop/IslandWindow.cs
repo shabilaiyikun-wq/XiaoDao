@@ -21,16 +21,21 @@ namespace WinIsland
         /* 窗口留白：给落影和阴影描边用 */
         const double MX = 24, MT = 16, MB = 34;
 
-        /* 弹簧：与网页版同参 */
-        const double K = 250, C = 24, KCOLLAPSE = 1.75, CCOLLAPSE = 1.38;
-
         string _scene;
         string _state;
         string _lookKey;
         string _artKey;
         bool _playing = true;
 
+        /* 形变主体：两个尺寸弹簧 + 锚定边缘（锚定边缘的定义见 Morph.cs / IslandFrame）。
+           弹簧常数也在那边（MorphBody.K/C，与网页版同参），这里不再存一份。 */
         Spring _w, _h;
+        MorphBody _body;
+
+        /* 内容面：当前那张 + 正在退场的那几张的交叉淡入淡出。
+           换掉了「清空 _content 再整条树重建 + 从 0 淡入」的写法，理由见 FaceBook 的注释。 */
+        readonly FaceBook _faces = new FaceBook();
+
         readonly Stopwatch _clock = new Stopwatch();
         double _lastT, _morphStartMs, _lastAboveMs, _lastMorphMs;
         bool _morphing, _animating;
@@ -44,6 +49,24 @@ namespace WinIsland
         Path _shA, _shB, _shC, _shD;
         ImageBrush _deskBrush;
         StreamGeometry _shape;
+
+        /* ---------------------------------------------------- 玻璃边缘折射
+           只给 glass 那套外观用：一张铺满岛体矩形的纹理，带内不透明、带外全透明，
+           内容是被「弯折」过的桌面采样（见 Glass.cs）。夹在 _refract 和 _wash
+           之间 —— 也就是压在真实采样之上、被同一层 wash + tint 盖住，
+           所以配色一点没变，变的只是边缘那几个像素的几何。 */
+        Rectangle _bend;
+        ImageBrush _bendBrush;
+        readonly GlassBend _glass = new GlassBend();
+        bool _bendDirty;
+        bool _bendOn = true;             // 运行期降级闸门（算不过来就关掉）
+        bool _bendOff;                   // --no-bend：本次启动强制关闭，给 A/B 验收用
+        double _bendPxPerDip;            // 纹理密度，跟 DPI 走
+        string _bendSig = "";
+        double _bendNextMs;
+        double _bendCostAvg;
+        int _bendTraceAt;
+        bool _capsTraced;
 
         DispatcherTimer _hitTimer;
         bool _hover;
@@ -222,9 +245,10 @@ namespace WinIsland
                             bool excludeCapture,
                             bool liveProbe, int freezeShot, bool heartbeat, bool todoOpen,
                             bool notify, bool notifyTest, bool notifyTrace,
-                            bool petAuto, bool petOn, bool petProbe)
+                            bool petAuto, bool petOn, bool petProbe, bool noBend)
         {
             _heartbeat = heartbeat;
+            _bendOff = noBend;
             _notify = notify;
             _notifyTest = notifyTest;
             _notifyTrace = notifyTrace;
@@ -330,6 +354,7 @@ namespace WinIsland
             SceneDef def = Scenes.Get(_scene);
             _w = new Spring(def.ExpW);
             _h = new Spring(def.ExpH);
+            _body = new MorphBody(_w, _h);
             if (_state == "compact") { _w.Snap(); _h.Snap(); }
             _w.Value = def.CompW; _w.Target = def.CompW;
             _h.Value = def.CompH; _h.Target = def.CompH;
@@ -428,6 +453,15 @@ namespace WinIsland
                 KernelType = System.Windows.Media.Effects.KernelType.Gaussian
             };
             _host.Children.Add(_refract);
+
+            /* 折射边带。插在采样层之上、wash 之下：和基底吃同一层色调，
+               只是边缘那圈像素来自「弯折后」的采样点。 */
+            _bendBrush = new ImageBrush();
+            _bendBrush.Stretch = Stretch.Fill;
+            _bend = MakeRect();
+            _bend.Fill = _bendBrush;
+            _bend.Visibility = Visibility.Collapsed;
+            _host.Children.Add(_bend);
 
             _wash = MakeRect();
             _host.Children.Add(_wash);
@@ -592,6 +626,28 @@ namespace WinIsland
             _hwnd = new WindowInteropHelper(this).Handle;
             _dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
             if (_dpi <= 0) _dpi = 1.0;
+
+            /* 折射边带纹理的密度跟 DPI 走（1 DIP = _dpi 个纹理像素），
+               上下都夹住：低 DPI 不用铺得比物理像素还密，高 DPI 也别失控。 */
+            _bendPxPerDip = Math.Max(1.0, Math.Min(2.0, _dpi));
+
+            /* 渲染路径取证：这条链上到底能不能用自定义 shader，写一次日志。
+               AllowsTransparency 的窗口由 WPF 软件合成，ShaderEffect 不在
+               软件光栅化的支持范围内 —— 折射因此走 CPU（见 Glass.cs 头部）。 */
+            if (!_capsTraced)
+            {
+                _capsTraced = true;
+                string caps;
+                try
+                {
+                    caps = "tier=" + RenderCapability.Tier
+                           + " ps2sw=" + RenderCapability.IsPixelShaderVersionSupportedInSoftware(2, 0)
+                           + " ps3sw=" + RenderCapability.IsPixelShaderVersionSupportedInSoftware(3, 0);
+                }
+                catch { caps = "tier=? (query failed)"; }
+                Trace("glass caps: " + caps + " layered=" + AllowsTransparency
+                      + " bendOff=" + _bendOff + " pxPerDip=" + _bendPxPerDip.ToString("0.00"));
+            }
 
             /* 截图热键 Alt+A。挂在岛的 HWND 上收 WM_HOTKEY ——
                岛是 WS_EX_NOACTIVATE，装不了键盘钩子，但 RegisterHotKey 是
@@ -888,9 +944,10 @@ namespace WinIsland
                窗口比原来宽 47.6 DIP，岛在窗口里的偏移跟着变，既有验收脚本
                按「窗口 = ExpW + 48」量出来的像素位置就整体偏了；
                桌宠关着的时候（也是验收脚本跑的默认形态）必须和改之前逐像素一致。 */
-            double nw = def.ExpW + MX * 2 + (_notify ? NotifyReserve : 0)
-                        + (_petOn ? PetReserve : 0);
-            double nh = def.ExpH + MT + MB;
+            double nw = IslandFrame.WindowW(def.ExpW, MX,
+                                           _notify ? NotifyReserve : 0,
+                                           _petOn ? PetReserve : 0);
+            double nh = IslandFrame.WindowH(def.ExpH, MT, MB);
             bool first = !_sized;
 
             Width = nw;
@@ -943,9 +1000,12 @@ namespace WinIsland
             SceneDef def = Scenes.Get(_scene);
             double w = Math.Max(2, IslandW), h = Math.Max(2, IslandH);
 
-            /* 岛体：当前尺寸，出界就压回屏幕 */
-            double bl = ClampD(_anchorX - w / 2, vl, vr - w);
-            double bt = ClampD(_anchorTop, vt, vb - h);
+            /* 岛体：当前尺寸，出界就压回屏幕。
+               锚定边缘在 IslandFrame.Island 里：横向绕岛心对称、纵向钉住岛顶 ——
+               形变过程中「岛心」和「岛顶」这两条线不动，另外两条往外长。 */
+            Rect want = IslandFrame.Island(_anchorX, _anchorTop, w, h);
+            double bl = ClampD(want.X, vl, vr - w);
+            double bt = ClampD(want.Y, vt, vb - h);
 
             /* 窗口：按展开态预留，形变中不动。
                展开时 ebl/ebt 就是岛体落点，所以岛在窗口内正好回到 lead / MT。
@@ -1359,13 +1419,14 @@ namespace WinIsland
             double tw, th;
             SizeOf(next, out tw, out th);
 
-            _w.Aim(tw);
-            _h.Aim(th);
+            /* 改目标而不是重置：Spring.Aim 保留当前值与速度，所以「展开到一半
+               又收回去」是从当前尺寸接着走，不是跳回起点重来。 */
+            _body.Aim(tw, th);
             _morphing = true;
             _morphStartMs = _clock.Elapsed.TotalMilliseconds;
             _lastAboveMs = _morphStartMs;
 
-            if (immediate) { _w.Snap(); _h.Snap(); }
+            if (immediate) _body.Snap();
             else StartAnimating();
 
             Rebuild(immediate);
@@ -1392,12 +1453,8 @@ namespace WinIsland
             CompositionTarget.Rendering -= OnFrame;
         }
 
-        bool InBand(Spring s)
-        {
-            double d = Math.Abs(s.Target - s.From);
-            if (d < 0.5) return true;
-            return Math.Abs(s.Value - s.Target) <= Math.Max(0.5, d * 0.01);
-        }
+        /* 形变「还在带子里」的判定搬进 MorphBody.InBand：那里和弹簧一起，
+           验证程序才够得着。这里不再留一份。 */
 
         void OnFrame(object sender, EventArgs e)
         {
@@ -1407,18 +1464,14 @@ namespace WinIsland
             if (dt < 0) dt = 0;
             if (dt > 0.05) dt = 0.05;
 
-            bool expanding = _state != "compact";
-            double k = expanding ? K : K * KCOLLAPSE;
-            double c = expanding ? C : C * CCOLLAPSE;
-
-            if (!_w.Settled) _w.Step(dt, k, c);
-            if (!_h.Settled) _h.Step(dt, k * 1.06, c * 1.02);
+            /* 主体：扩张用 K/C，收起用更硬的一组（见 MorphBody.Step） */
+            _body.Step(dt, _state != "compact");
 
             double nowMs = _clock.Elapsed.TotalMilliseconds;
-            if (!InBand(_w) || !InBand(_h)) _lastAboveMs = nowMs;
+            if (!_body.InBand) _lastAboveMs = nowMs;
 
-            if (_w.Settled) { _w.Snap(); }
-            if (_h.Settled) { _h.Snap(); }
+            /* 附属元素：每张内容面各自推进（进场软、退场快、进场前等一拍） */
+            _faces.Step(dt);
 
             UpdateSpecularFromCursor();
             Apply();
@@ -1428,15 +1481,21 @@ namespace WinIsland
             if (_ballStartMs >= 0) ApplyBallAnim();
             AdvancePet(now);
 
-            if (_w.Settled && _h.Settled && _ballStartMs < 0 && !PetWantsFrames
+            /* 主体一到位就把这次形变的耗时结算掉。
+               不能等「停帧」那一步再算：停帧现在还要等内容面淡完（见下面），
+               而耗时上报是给「形变用了多久」用的，不该被内容交接拖长。 */
+            if (_body.Settled && _morphing)
+            {
+                _lastMorphMs = _lastAboveMs - _morphStartMs;
+                if (_lastMorphMs < 1) _lastMorphMs = nowMs - _morphStartMs;
+                _morphing = false;
+            }
+
+            /* 内容面也算在「还在动」里：它们的可见度/位移是独立的时间线，
+               主体一 settled 就停帧会把还没淡完的内容截在半透明上。 */
+            if (_body.Settled && !_faces.Busy && _ballStartMs < 0 && !PetWantsFrames
                 && !_petTween)
             {
-                if (_morphing)
-                {
-                    _lastMorphMs = _lastAboveMs - _morphStartMs;
-                    if (_lastMorphMs < 1) _lastMorphMs = nowMs - _morphStartMs;
-                    _morphing = false;
-                }
                 StopAnimating();
             }
         }
@@ -1465,6 +1524,7 @@ namespace WinIsland
             Canvas.SetTop(_host, iy);
 
             _refract.Width = w; _refract.Height = h;
+            _bend.Width = w; _bend.Height = h;
             _wash.Width = w; _wash.Height = h;
             _tint.Width = w; _tint.Height = h;
             _spec.Width = w; _spec.Height = h;
@@ -1477,6 +1537,7 @@ namespace WinIsland
             /* 折射底 */
             _curIx = ix; _curIy = iy; _curW = w; _curH = h;
             UpdateRefract();
+            UpdateBend(look, w, h, r);
             PlaceBall();
 
             _wash.Fill = Ui.Br(look.RefractWash);
@@ -1524,6 +1585,9 @@ namespace WinIsland
             /* 岛体几何变了，桌宠的落点和裁剪也要跟着走 —— 这一句不能少，
                否则贴边/形变时球会停在旧位置上（球在窗口里，窗口本身没动）。 */
             PlacePet();
+
+            /* 内容面的可见度/位移：和几何同一条每帧路径，不会有一条走在前面 */
+            ApplyFaces();
         }
 
         /* 压在折射之上的那一层，对应岛体的 RefractWash + 竖向 tint：
@@ -1569,6 +1633,35 @@ namespace WinIsland
             if (sw <= 0 || sh <= 0) return;
             _desktopShot = Native.Capture(0, 0, sw, sh);
             _shotRect = new Rect(0, 0, sw, sh);
+            FeedBendFromShot();
+        }
+
+        /// <summary>
+        /// 把这张静态快照喂给折射层。
+        ///
+        /// 实时采样接手之前（以及被允许捕捉的那 700ms 慢速档之间），折射层只能拿
+        /// 这张开机快照做源 —— 和基底那层用的是同一张图，所以两边不会打架。
+        /// 只在快照换新的时候调一次，不进轮询。
+        /// </summary>
+        void FeedBendFromShot()
+        {
+            if (_bendOff) return;
+            Look look = Look.ByKey(_lookKey);
+            if (look.Bend <= 0) return;
+            if (_desktopShot == null) return;
+
+            int w = _desktopShot.PixelWidth;
+            int h = _desktopShot.PixelHeight;
+            if (w <= 0 || h <= 0) return;
+
+            try
+            {
+                byte[] buf = new byte[w * h * 4];
+                _desktopShot.CopyPixels(buf, w * 4, 0);
+                _glass.Feed(buf, w, h, w * 4, _dpi);
+                _bendDirty = true;
+            }
+            catch (Exception ex) { Trace("bend feed(shot) failed: " + ex.Message); }
         }
 
         /* --------------------------------------------------- 自遮挡实验
@@ -1917,6 +2010,14 @@ namespace WinIsland
                                   _grabber.Bits, _grabber.Stride * h, _grabber.Stride);
                 _liveFrames++;
 
+                /* 折射层和基底共用这一帧：喂进去之后标记脏，
+                   由下面的 UpdateBend 在节流窗口内重算边带。 */
+                if (!_bendOff && Look.ByKey(_lookKey).Bend > 0)
+                {
+                    _glass.Feed(_grabber.Bits, w, h, _grabber.Stride, _dpi);
+                    _bendDirty = true;
+                }
+
                 if (_freezeShot > 0)
                 {
                     int bx = (int)Math.Round((_curIx + _curW / 2 - 20) * _dpi);
@@ -1934,6 +2035,10 @@ namespace WinIsland
             /* 窗口一动、岛一变形，采样窗口就得跟着换。每帧一次 Rect 赋值，
                不做脏检查——比判断「要不要更新」更快。 */
             UpdateRefract();
+
+            /* 实时采样是静止时唯一的更新源：没有动画就没有 Apply，
+               边带要么在这里跟一帧，要么就一直停在上一张桌面上。 */
+            UpdateBend(Look.ByKey(_lookKey), _curW, _curH, Math.Min(30, _curH / 2));
         }
 
         void UpdateRefract()
@@ -1948,6 +2053,79 @@ namespace WinIsland
             else
             {
                 _refract.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /* ------------------------------------------------------- 玻璃边缘折射
+
+           把「边缘弯折」这件事接到现有采样上：源就是 _grabber 抓到的那张桌面帧
+           （和基底同一个源），所以不需要第二次抓屏，也不碰截图亲和性。
+
+           节流与降级：形变过程中 Apply 是每帧都跑的，而指数级地重算边带没有意义
+           （边带本来就只有 26 DIP 宽，纹理又是糊的）。这里按时间节流到 30Hz，
+           并且看实际开销自己退：超过 6ms/次降到 10Hz，超过 14ms/次整个关掉。
+           关掉之后仍然是原来那张干净玻璃 —— 宁可少一层效果，不要卡。 */
+        void UpdateBend(Look look, double w, double h, double r)
+        {
+            if (_bend == null) return;
+
+            if (_bendOff || look.Bend <= 0 || !_bendOn || !_glass.HasSource)
+            {
+                _bend.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            string sig = Round(w) + "x" + Round(h) + "|r" + Round(r)
+                         + "|" + Round(_ix) + "," + Round(_iy)
+                         + "|d" + Round(_dpi * 1000);
+
+            double now = _clock.Elapsed.TotalMilliseconds;
+            bool moved = sig != _bendSig;
+            if (!moved && !_bendDirty) return;
+            if (moved && now < _bendNextMs) return;
+
+            /* 岛体左上角在抓屏源里的像素坐标 —— 和 DeskViewbox 同一套换算，
+               所以「整屏快照」和「只抓窗口」两种源都能直接用。 */
+            double originX = (Left + _ix) * _dpi - _shotRect.X;
+            double originY = (Top + _iy) * _dpi - _shotRect.Y;
+
+            bool ok = _glass.Render(w, h, r, look.Bend, look.BendKick, look.BendSplit,
+                                    16.0, originX, originY, _dpi, _bendPxPerDip);
+            if (!ok)
+            {
+                _bend.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            _bendSig = sig;
+            _bendDirty = false;
+
+            double cost = _glass.LastCostMs;
+            _bendCostAvg = _bendCostAvg <= 0 ? cost : (_bendCostAvg * 0.72 + cost * 0.28);
+
+            double interval = _bendCostAvg > 6.0 ? 100.0 : 33.0;
+            if (_bendCostAvg > 14.0)
+            {
+                _bendOn = false;
+                _bend.Visibility = Visibility.Collapsed;
+                Trace("GLASS bend OFF: avg " + _bendCostAvg.ToString("0.0") + "ms/render too slow");
+                return;
+            }
+            _bendNextMs = now + interval;
+
+            if (_bendBrush.ImageSource != _glass.Bitmap) _bendBrush.ImageSource = _glass.Bitmap;
+            if (_bend.Visibility != Visibility.Visible) _bend.Visibility = Visibility.Visible;
+
+            /* 头几次和明显变化各留一条，别把日志刷爆 */
+            if (_bendTraceAt < 4 || cost > 12.0)
+            {
+                _bendTraceAt++;
+                Trace("GLASS bend " + Round(w) + "x" + Round(h) + " r" + Round(r)
+                      + " tex=" + _glass.Bitmap.PixelWidth + "x" + _glass.Bitmap.PixelHeight
+                      + " band=" + look.Bend + " kick=" + look.BendKick + " split=" + look.BendSplit
+                      + " src=" + _glass.SourceWidth + "x" + _glass.SourceHeight
+                      + "@" + _glass.SourcePxPerDip.ToString("0.00") + "px/dip"
+                      + " cost=" + cost.ToString("0.00") + "ms avg=" + _bendCostAvg.ToString("0.00"));
             }
         }
 
@@ -1988,6 +2166,25 @@ namespace WinIsland
         }
 
         /* -------------------------------------------------------------- 内容 */
+
+        /* 内容是「面」不是「树」。
+
+           原来这里把整棵内容树清空重建，再用一条新的 DoubleAnimation 从 0 淡入、
+           配一个 6px 的平移；切层越快闪得越明显，而且新旧内容之间没有交接。
+           现在改成：内容按 key 登记成一张「脸」，切层只改各张脸的目标可见度，
+           由 FaceBook 推进（见 Morph.cs）。
+
+           key 里要带上的东西 = 影响内容长什么样的全部输入：场景、层、外观、素材、
+           自动/钉住（第二层的尺寸不同）、桌宠是否占着第一层那颗球的位置。
+           少带一个就会「该重建的时候复用了旧脸」，症状是配色/文案不跟着变。 */
+        static string FaceKey(string state, string scene, string look, string art,
+                              bool auto, bool petDocked)
+        {
+            return state + "|" + scene + "|" + look + "|" + art
+                 + "|" + (auto ? "auto" : "pin")
+                 + "|" + (petDocked ? "dock" : "orb");
+        }
+
         void Rebuild(bool immediate)
         {
             Look look = Look.ByKey(_lookKey);
@@ -1997,36 +2194,87 @@ namespace WinIsland
             double tw, th;
             SizeOf(_state, out tw, out th);
 
-            _content.Children.Clear();
             /* petDocked：第一层那颗原球不画，位置让给桌宠。
                只在「桌宠开着 + 正好是 idle」时留白 —— 其余情况原球照旧，
                这样关掉桌宠、或者还停在第二/三层时，界面和以前逐像素一致。 */
             bool petDocked = _petOn && _state == "idle";
-            Built built = Layout.Build(_scene, _state, tw, th, look, art, _snap, Actions(), !_pinnedState, petDocked);
-            _content.Children.Add(built.Root);
-            _built = built;
+            bool auto = !_pinnedState;
 
-            if (immediate)
-            {
-                _content.Opacity = 1;
-            }
-            else
-            {
-                _content.Opacity = 0;
-                DoubleAnimation fade = new DoubleAnimation(1,
-                    new Duration(TimeSpan.FromMilliseconds(240)));
-                fade.BeginTime = TimeSpan.FromMilliseconds(55);
-                fade.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
-                _content.BeginAnimation(UIElement.OpacityProperty, fade);
+            string key = FaceKey(_state, _scene, _lookKey, _artKey, auto, petDocked);
 
-                TranslateTransform tt = new TranslateTransform(0, 6);
-                _content.RenderTransform = tt;
-                DoubleAnimation rise = new DoubleAnimation(0,
-                    new Duration(TimeSpan.FromMilliseconds(300)));
-                rise.BeginTime = TimeSpan.FromMilliseconds(55);
-                rise.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
-                tt.BeginAnimation(TranslateTransform.YProperty, rise);
+            /* 内容按目标尺寸建（版面常量不变）。形变过程中的「还没长够」由
+               _host 的超椭圆裁剪 + 进场延迟一起遮住，内容本身不缩放 —— 这就是
+               上游那条 animate the surface, never the text。 */
+            _faces.Show(key, delegate
+            {
+                Built b = Layout.Build(_scene, _state, tw, th, look, art, _snap,
+                                       Actions(), auto, petDocked);
+                MorphFaceVisual.Prepare(b.Root);
+                return b;
+            }, immediate);
+
+            MountFaces();
+            ApplyFaces();
+        }
+
+        /// <summary>把场上每一张脸挂进 _content（已经在树上的不重复添加）。</summary>
+        void MountFaces()
+        {
+            List<MorphFace> faces = _faces.Faces;
+            for (int i = 0; i < faces.Count; i++)
+            {
+                FrameworkElement el = FaceElement(faces[i]);
+                if (el == null) continue;
+                if (!_content.Children.Contains(el)) _content.Children.Add(el);
             }
+            DrainFaces();
+        }
+
+        static FrameworkElement FaceElement(MorphFace face)
+        {
+            Built b = face == null ? null : face.Payload as Built;
+            return b == null ? null : b.Root;
+        }
+
+        /// <summary>摘掉已经退完 / 被淘汰的脸。树上不留残影。</summary>
+        void DrainFaces()
+        {
+            List<MorphFace> dead = _faces.Dead;
+            if (dead.Count == 0) return;
+            for (int i = 0; i < dead.Count; i++)
+            {
+                FrameworkElement el = FaceElement(dead[i]);
+                if (el != null) _content.Children.Remove(el);
+                /* 被淘汰的脸不再属于任何人：把 Live 更新器也清掉，
+                   免得以后有人持有它还在往已经摘下来的树上写。 */
+                Built b = dead[i].Payload as Built;
+                if (b != null) b.Live.Clear();
+            }
+            dead.Clear();
+        }
+
+        /// <summary>
+        /// 把每张脸的可见度/位移写到元素上，并让当前那张拿到命中。
+        /// 挂在 Apply() 里：形变和淡入淡出共用同一条每帧路径，不会有一条走在前面。
+        /// </summary>
+        void ApplyFaces()
+        {
+            if (_content == null) return;
+
+            List<MorphFace> faces = _faces.Faces;
+            for (int i = 0; i < faces.Count; i++)
+            {
+                MorphFace f = faces[i];
+                FrameworkElement el = FaceElement(f);
+                if (el == null) continue;
+                MorphFaceVisual.Apply(el, f, ReferenceEquals(f, _faces.Front));
+            }
+
+            DrainFaces();
+
+            /* RefreshNow() 只刷当前那张脸：退场中的旧脸保留它最后的样子，
+               反正它正在消失，跟着数据跳反而显眼。 */
+            _built = _faces.Front == null ? null : _faces.Front.Payload as Built;
         }
 
         /* ---------------------------------------------------- 穿透与悬停 */
@@ -3021,9 +3269,11 @@ namespace WinIsland
 
             double nw, nh;
             SizeOf(_state, out nw, out nh);
-            _w.Aim(nw);
-            _h.Aim(nh);
-            _w.Snap(); _h.Snap();
+            /* 换场景是「换一张卡」而不是「形变到另一张卡」：尺寸直接落位，
+               内容的交接交给面（FaceBook）去淡 —— 以前是整棵树清空重建，
+               换页会闪一下。 */
+            _body.Aim(nw, nh);
+            _body.Snap();
 
             Rebuild(false);
             Apply();
@@ -3080,6 +3330,17 @@ namespace WinIsland
             W("SELFTEST begin dpi=" + _dpi.ToString("0.###"));
             W("SCREEN " + Native.ScreenWidth + "x" + Native.ScreenHeight);
 
+            /* 自检期间关掉自动状态机（Reconcile）。
+
+               它按「悬停 / 在放歌」推断岛该停在哪一层，而自检是脚本自己在推层、
+               鼠标又不在岛上 —— 两边抢同一个状态，断言就会被时不时顶掉。
+               实测症状：刚 SetState("expanded") 再等它 settle，读回来是 52x30
+               （第一层），同时 MORPH 却记了 396ms —— 因为中途被改成了 idle。
+
+               _petProbeLock 本来就是「探针接管层状态、数据轮询不许插手」的那个闸，
+               这里复用同一个，不另造开关。 */
+            _petProbeLock = true;
+
             /* 源码是不带 BOM 的 UTF-8。若编译器按系统 ANSI 代码页读源码，
                所有中文字面量都会变成乱码——而像素计数看不出来。
                这里直接把一个已知字符串的码位打出来对照。 */
@@ -3123,6 +3384,78 @@ namespace WinIsland
                 if (_w.Settled && _h.Settled) break;
             }
             W("STATE idle " + Round(IslandW) + "x" + Round(IslandH));
+
+            /* ---- 形变 / 内容交接的实测（真实渲染循环，不是离线模型）----
+
+               要证两件事：
+                 1. 快速反向切层时，岛体从当前实际尺寸接着走 —— 跳回起点会是
+                    几十上百 px 的一步，这里逐帧采样抓它；
+                 2. 内容不是「先清空再淡入」—— 换层中途必须同时有两张脸，
+                    settle 之后必须只剩一张（不留残影）。
+
+               离线断言在 desktop\verify\morph-tests.cmd 里（不建窗口、逐帧确定），
+               这一段量的是真跑起来的样子：有没有真走到这条路径、有没有被
+               DispatcherTimer 的节拍或帧回收条件截断。 */
+            {
+                _scene = "media";
+                SyncWindowSize();
+                SetState("idle", true);
+                await Task.Delay(40);
+
+                /* (1) 展开到约 1/3 就改收回 */
+                SetState("expanded", false);
+                await Task.Delay(110);
+                double turnW = IslandW;
+
+                /* 用**速度**判跳变，不用「单帧位移」：这里的采样间隔是
+                   Task.Delay(8) 的实际抖动（8~20ms 都有），单帧位移的阈值会被
+                   采样抖动撑大，判不准。速度与采样间隔无关。
+                   实测峰值约 2500px/s（带速度改向时再高一点）；「跳回起点」
+                   对应的是一步百 px 级的位移，换算成速度是万级。 */
+                double prev = IslandW;
+                double prevT = _clock.Elapsed.TotalSeconds;
+                double maxV = 0;
+                SetState("idle", false);
+                for (int i = 0; i < 34; i++)
+                {
+                    await Task.Delay(8);
+                    double cur = IslandW;
+                    double nowT = _clock.Elapsed.TotalSeconds;
+                    double dts = nowT - prevT;
+                    if (dts > 0.001) maxV = Math.Max(maxV, Math.Abs(cur - prev) / dts);
+                    prev = cur;
+                    prevT = nowT;
+                }
+                W("MORPH reverse turn=" + Round(turnW) + " maxV=" + Round(maxV)
+                  + "px/s (期望 <3500；跳回起点是万级) settled=" + (_w.Settled && _h.Settled)
+                  + " w=" + Round(IslandW));
+
+                /* (2) 反向再展开，采样内容面的交接 */
+                SetState("expanded", false);
+                int maxFaces = 0;
+                bool sawPartial = false;
+                for (int i = 0; i < 34; i++)
+                {
+                    await Task.Delay(8);
+                    maxFaces = Math.Max(maxFaces, _faces.Count);
+                    MorphFace f = _faces.Front;
+                    if (f != null && f.Opacity > 0.05 && f.Opacity < 0.95) sawPartial = true;
+                }
+                W("FACES during swap max=" + maxFaces + " sawPartialFront=" + sawPartial
+                  + " (期望 max=2, partial=true)");
+
+                await Task.Delay(320);
+                MorphFace front = _faces.Front;
+                W("FACES after settle count=" + _faces.Count
+                  + " children=" + (_content == null ? -1 : _content.Children.Count)
+                  + " frontOp=" + (front == null ? "none" : Round(front.Opacity))
+                  + " (期望 count=1, children=1, op=1)");
+                W("WINDOW " + Round(Width) + "x" + Round(Height)
+                  + " island=" + Round(IslandW) + "x" + Round(IslandH));
+
+                SetState("idle", true);
+                await Task.Delay(60);
+            }
 
             foreach (SceneDef d in Scenes.All)
             {

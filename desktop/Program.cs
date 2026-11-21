@@ -29,6 +29,29 @@ namespace WinIsland
         {
             Native.MakeDpiAware();
 
+            /* 液态连接原型（隔离实验）的验证入口。
+               见 LiquidGeometry.cs / LiquidTension.cs / LiquidProbe.cs。
+
+               关键：这条分支在**建任何窗口之前**就返回，所以
+                 · 不传 --liquid-probe 时，这个程序的行为与引入原型之前逐帧一致；
+                 · 传了也不建岛、不建桌宠、不碰正式可视树 —— 只在内存里渲染取证。
+               原型本身默认关闭、也没有接进正式外观（原因见 notes/LIQUID-NECK.md）。 */
+            if (Flag(args, "--liquid-probe"))
+            {
+                /* 场景尺寸的唯一来源是 Ui.cs；这里覆盖镜像常数，
+                   于是 Ui.cs 改了而 LiquidPair 忘了改会被探针当场抓到。 */
+                LiquidPair.IdleW = Scenes.IdleW;
+                LiquidPair.IdleH = Scenes.IdleH;
+                LiquidPair.PlayW = Scenes.PlayW;
+                LiquidPair.PlayH = Scenes.PlayH;
+
+                string probeOut = Arg(args, "--liquid-out", "");
+                return LiquidProbe.Run(probeOut, delegate(string s)
+                {
+                    /* 正式 exe 是 winexe，没有控制台；取证靠写文件。 */
+                });
+            }
+
             /* 外观 / 场景 / 素材的默认值留空：构造器要靠它区分「用户指定了」和
                 「没指定，应该从 ui.txt 恢复上次的选择」。 */
             string look = Arg(args, "--look", "");
@@ -69,6 +92,10 @@ namespace WinIsland
             /* 岛内集成版桌宠的取证跑法：自渲染 + 像素度量 + JSON/PNG，
                只验收集成版，独立 demo 不在这条路上。 */
             bool petProbe = Flag(args, "--pet-probe");
+            /* 关掉玻璃的边缘折射（glass 外观专有）。只用于验收：同一套环境下
+               跑两遍，一遍带折射一遍不带，逐像素比「哪些像素被这个特性动过」。
+               它不落盘，也不改用户的偏好。 */
+            bool noBend = Flag(args, "--no-bend");
             int freezeShot = 0;
             string freezeArg = Arg(args, "--freeze-shot", "");
             if (freezeArg != "") { int.TryParse(freezeArg, out freezeShot); }
@@ -123,7 +150,7 @@ namespace WinIsland
                 /* 正常启动：先建岛，岛 Loaded 之后再按偏好拉桌宠（见 IslandWindow.OnLoaded）。
                    顺序不能反 —— 桌宠是 topmost，先建它再建岛，用户看到的第一帧里
                    岛要从桌宠背后弹出来，观感是「桌宠被压了一下」。 */
-                IslandWindow win = new IslandWindow(look, scene, art, state, selftest, log, wdaProbe, noWda, excludeCapture, liveProbe, freezeShot, heartbeat, todoOpen, notify || notifyTest, notifyTest, notifyTrace, petAuto, petOn, petProbe);
+                IslandWindow win = new IslandWindow(look, scene, art, state, selftest, log, wdaProbe, noWda, excludeCapture, liveProbe, freezeShot, heartbeat, todoOpen, notify || notifyTest, notifyTest, notifyTrace, petAuto, petOn, petProbe, noBend);
                 win.Show();
             };
 

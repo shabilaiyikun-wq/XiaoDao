@@ -1,0 +1,80 @@
+FluidKit
+https://github.com/runvendo/fluidkit
+
+The following files in this project contain substantial portions of the
+FluidKit software, ported from TypeScript/SVG path-data to C# / WPF Geometry:
+
+    desktop/LiquidGeometry.cs
+        derived from  src/liquid/geometry.ts
+                      (bridgePath, circlePath, dist, LiquidBody)
+
+    desktop/LiquidTension.cs
+        derived from  src/liquid/tension.ts
+                      (TensionField, neckWaist, CONNECT_STRETCH, SNAP_STRETCH,
+                       MIN_WAIST_FACTOR, BASE_WAIST)
+
+The MIT License text below is reproduced in full, as required.
+
+--------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 Yousef Hindy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--------------------------------------------------------------------------
+
+Notes on what was and was not taken
+
+Taken (ported, then modified):
+
+  * The metaball bridge construction between two circles: tangent points on
+    each circle at angles interpolated between the circle-intersection spread
+    and the maximum spread, joined by two cubic Beziers whose control points
+    lie along each circle's tangent direction.
+  * The control-point length rule
+        min(waist * handle, dist(p1, p3) / (r1 + r2)) * min(1, 2d / (r1 + r2))
+    with handle = 2.1 and reach = 1.6.
+  * Surface-tension hysteresis: a pair connects at stretch < 1.02 and breaks
+    at stretch > 1.30, with neck waist following
+        baseWaist * clamp((snap - stretch) / 0.35, 0.6, 1.0), baseWaist = 0.55.
+
+Not taken:
+
+  * The SVG path-data string emitters and the `clip-path: path(...)` rendering
+    strategy. WPF has no equivalent, so the port emits PathGeometry objects and
+    relies on PathGeometry.FillRule = Nonzero over figures appended to one
+    geometry. The reference's reliance on matching subpath winding is preserved
+    but made explicit and testable (LiquidGeometry.BridgeNeedsReverse).
+  * Everything else in FluidKit (React components, materials, refraction,
+    caustics, theme system). None of it is used here.
+
+Modifications made to the ported algorithm (documented in the file headers):
+
+  1. acos() arguments are clamped to [-1, 1]; the reference relies on floating
+     point staying in range, and an out-of-range argument yields NaN, which WPF
+     silently drops from a geometry instead of throwing.
+  2. The neck width is measured as an absolute distance in DIP
+     (LiquidGeometry.MeasureNeck) so a hard minimum-width floor can be enforced
+     (LiquidTension.DefaultMinNeckWidth). The reference only exposes a relative
+     0..1 waist coefficient.
+  3. Connection state is only recorded once geometry was actually emitted. The
+     reference adds the pair to `connected` before appending the bridge, so a
+     pair can stay "connected" with nothing drawn.
+  4. Pair keys are order independent; the reference's `${a.id}|${b.id}` key
+     depends on iteration order.
