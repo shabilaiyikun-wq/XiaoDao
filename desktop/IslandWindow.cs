@@ -49,6 +49,18 @@ namespace WinIsland
         bool _hover;
         bool _pinnedState;
 
+        /* 待办到点提醒的「临时压层」。
+
+           以前这里直接写 _pinnedState = true，但 _pinnedState 的语义是
+           「用户/命令行明确指定了层，不要自动改」，全项目没有任何地方会把它
+           清回 false —— 于是提醒过一次之后三层状态机就永久死掉，
+           鼠标移开也不再收层（现象：只卡在第三层收不起来）。
+           提醒只是「压一会儿」，用带截止时间的临时压层表达，过点后把场景还回去，
+           状态机自然接管。 */
+        double _remindUntilMs;
+        string _remindScene;
+        const double RemindHold = 6.0;   /* 秒：至少让用户看清是哪条 */
+
         /* 拖动改位置：按岛体拖动整个窗口，松手落盘，下次启动还在原位 */
         bool _dragging, _dragMoved, _dragSawMove, _placed, _sized;
         Point _dragCursorStart;
@@ -718,8 +730,12 @@ namespace WinIsland
             if (due == null) return;
 
             Trace("todo due: '" + due.Text + "'");
+
+            /* 不要动 _pinnedState：那是「用户钉住的层」，没有复位路径。
+               这里只压一个带截止时间的提醒，压完自动还场景并允许收层。 */
+            if (_scene != "todo") _remindScene = _scene;
             _scene = "todo";
-            _pinnedState = true;            /* 钉住展开，别被悬停逻辑立刻收回去 */
+            _remindUntilMs = _clock.Elapsed.TotalMilliseconds + RemindHold * 1000.0;
 
             /* 必须走 SetState：它用 _w.Aim() 设目标并挂上 CompositionTarget.Rendering
                去跑弹簧动画。直接写 _w.Target 不会启动动画循环，岛会卡在旧尺寸。 */
@@ -1001,6 +1017,24 @@ namespace WinIsland
         void Reconcile()
         {
             if (_pinnedState) return;
+
+            /* 待办提醒压层：截止前不收回（悬停也照旧撑着，那是下面的 hover 规则）。
+               截止后先把场景还原，再往下走正常的层级判定 —— 不能只清标记，
+               否则岛会以 todo 场景的展开尺寸塌成小球。 */
+            if (_remindUntilMs > 0)
+            {
+                if (_hover || _clock.Elapsed.TotalMilliseconds < _remindUntilMs) return;
+                _remindUntilMs = 0;
+                if (_scene == "todo")
+                {
+                    string back = (_remindScene != null && _remindScene.Length > 0)
+                                  ? _remindScene
+                                  : Prefs.Scene;
+                    if (back == null || back.Length == 0) back = "media";
+                    _remindScene = null;
+                    GoScene(back, false);
+                }
+            }
             /* 输入窗开着时鼠标必然离开了岛（去打字了），这时候不能自动收回，
                否则用户一边写一边看着岛塌成小球 */
             if (TodoInput.Current != null && TodoInput.Current.IsOpen) return;
