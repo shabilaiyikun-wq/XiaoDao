@@ -33,6 +33,16 @@ namespace WinIsland
         public const double PadExp = 18;
         public const double PadComp = 9;
 
+        /* 第一层那颗球的直径系数。岛内集成版要拿同一个数字去定桌宠球体的尺寸 ——
+           两边各写一个 0.56，改一处忘一处就会差几像素，所以放在这里当唯一来源。 */
+        public const double IdleOrbRatio = 0.56;
+
+        /// <summary>第一层那颗球的直径（DIP）。52×30 → 16.8。</summary>
+        public static double IdleOrbSize(double w, double h)
+        {
+            return Math.Min(w, h) * IdleOrbRatio;
+        }
+
         /* 埋点出口。Layout 是静态类，拿不到窗口的 Trace，
            由 IslandWindow 在构造时接上去。点击到底有没有到达元素、
            有没有被 300ms 防抖吞掉，全靠这里留下的两行日志分辨。 */
@@ -41,6 +51,20 @@ namespace WinIsland
         public static Built Build(string scene, string state, double w, double h,
                                   Look look, Art art, Snap s, CardActions act, bool auto)
         {
+            return Build(scene, state, w, h, look, art, s, act, auto, false);
+        }
+
+        /* petDocked：第一层的紫色球**不画**，位置留给桌宠。
+
+           为什么由 Layout 决定而不是建完再从树上摘掉：那颗球是一个完整的
+           Grid（球体 + 绕圈的高光），摘它得先把它从 canvas 里认出来。
+           层状态一进来就知道「这次要不要留白」，是最干净的一刀。
+
+           注意只影响 idle 这一层：第二/三层的版面里本来没有球。 */
+        public static Built Build(string scene, string state, double w, double h,
+                                  Look look, Art art, Snap s, CardActions act, bool auto,
+                                  bool petDocked)
+        {
             Built built = new Built();
             Canvas root = new Canvas();
             root.Width = w;
@@ -48,10 +72,15 @@ namespace WinIsland
 
             if (state == "idle")
             {
-                /* 第一层：只剩一颗在转的球，别的一概没有 */
-                double size = Math.Min(w, h) * 0.56;
-                FrameworkElement orb = Ui.Orb(art, look, size);
-                Ui.At(root, orb, (w - size) / 2, (h - size) / 2);
+                if (!petDocked)
+                {
+                    /* 第一层：只剩一颗在转的球，别的一概没有 */
+                    double size = IdleOrbSize(w, h);
+                    FrameworkElement orb = Ui.Orb(art, look, size);
+                    Ui.At(root, orb, (w - size) / 2, (h - size) / 2);
+                }
+                /* petDocked 时这里留一个空 canvas：版面和尺寸不变，
+                   球的坑由 IslandWindow 那一层填（见 _petDock）。 */
                 built.Root = root;
                 return built;
             }

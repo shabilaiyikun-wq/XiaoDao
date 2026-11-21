@@ -32,11 +32,14 @@ namespace WinIsland
         const double HoverSlack = 6;  /* 命中容差 */
         const double DragThreshold = 3.0;
 
-        ModelVisual3D _modelVisual;
-        TranslateTransform _shift;
-
         readonly Stopwatch _clock = new Stopwatch();
-        readonly PetAnimationRuntime _runtime = new PetAnimationRuntime(17);
+
+        /* 3D 舞台 + 动画状态都在 PetStage 里，和岛内集成共用同一份实现。
+           这里不再自己持有 runtime / ModelVisual3D / 几何 key —— 那三样一旦
+           两处各写一遍，「岛内的球」和「出场的球」就会各跑一套动画，
+           而那正是这次要避免的事。 */
+        readonly PetStage _stage = new PetStage(PetStage.RefDiameter);
+
         DispatcherTimer _hit;
         DispatcherTimer _demo;
         bool _demoSpinNext = true;
@@ -71,7 +74,6 @@ namespace WinIsland
         bool _animating;
         double _lastRender = -1;
         double _lastAnimationTime;
-        long _geomKey = long.MinValue;
 
         double _pokeAt = -1;
         double _spinAt = -1;
@@ -85,24 +87,24 @@ namespace WinIsland
         /// <summary>当前动画状态名：idle/happy/… 之一，或 PlayClip 之后就是那段动画自己的名字。
         /// 只读。主程序的右键菜单靠它决定「表情模式」和 28 段动画里哪一项该打勾，
         /// 自己再记一份「上次点了什么」会和 runtime 的真实状态漂移。</summary>
-        public string State { get { return _runtime.State; } }
+        public string State { get { return _stage.State; } }
 
         public void Poke()
         {
             _pokeAt = _clock.Elapsed.TotalSeconds;
-            _runtime.Poke();
+            _stage.Poke();
             Trace("poke command");
         }
 
         public void Spin()
         {
             _spinAt = _clock.Elapsed.TotalSeconds;
-            _runtime.Spin();
+            _stage.Spin();
             Trace("spin command");
         }
 
-        public void SetState(string state) { _runtime.SetState(state); }
-        public void PlayClip(string clip) { _runtime.PlayClip(clip); }
+        public void SetState(string state) { _stage.SetState(state); }
+        public void PlayClip(string clip) { _stage.PlayClip(clip); }
 
         public PetWindow(string logPath, bool demo)
         {
@@ -127,23 +129,17 @@ namespace WinIsland
             root.Height = Size;
             root.Background = Brushes.Transparent;
 
-            /* 3D 球体由正交相机投影，舞台只负责把画面放到窗口中心。 */
+            /* 3D 球体由正交相机投影，舞台只负责把画面放到窗口中心。
+               PetStage.Shell 是固定尺寸的视口（标称球径的 1.6 倍），比窗口大一圈；
+               多出来的部分是透明的，片段里的位移轨道就在这个视口里走，
+               不再靠 RenderTransform 挪画面（挪了会连带把位移量重复一次）。 */
             Canvas stage = new Canvas();
             stage.IsHitTestVisible = false;
-            _shift = new TranslateTransform(0, 0);
-            stage.RenderTransform = _shift;
-
-            Viewport3D viewport = new Viewport3D();
-            viewport.Width = Size;
-            viewport.Height = Size;
-            viewport.IsHitTestVisible = false;
-            viewport.ClipToBounds = true;
-            viewport.Camera = new OrthographicCamera(
-                new Point3D(0, 0, 3), new Vector3D(0, 0, -3),
-                new Vector3D(0, 1, 0), 3.0);
-            _modelVisual = new ModelVisual3D();
-            viewport.Children.Add(_modelVisual);
-            stage.Children.Add(viewport);
+            stage.Width = Size;
+            stage.Height = Size;
+            Canvas.SetLeft(_stage.Shell, Size / 2.0 - _stage.ShellSize / 2.0);
+            Canvas.SetTop(_stage.Shell, Size / 2.0 - _stage.ShellSize / 2.0);
+            stage.Children.Add(_stage.Shell);
             root.Children.Add(stage);
 
             Content = root;
@@ -315,68 +311,11 @@ namespace WinIsland
             if (_lastRender >= 0 && t - _lastRender < 0.0166) return;
             _lastRender = t;
 
-            _runtime.Advance(Math.Max(0, t - _lastAnimationTime));
+            /* 一帧只推一次状态：runtime 推进 + 几何按 key 去重后刷新，
+               都在 PetStage.Advance 里。这里只剩节流和计数。 */
+            _stage.Advance(Math.Max(0, t - _lastAnimationTime));
             _lastAnimationTime = t;
-            PetFrame f = _runtime.Frame;
-            Apply(f);
             _frames++;
-        }
-
-        void Apply(PetFrame f)
-        {
-            /* 几何重建只在参数真的变了的时候做。
-               量化步长是「看不出差别的最大步长」，这样呼吸不会导致每帧重建，
-               但视线移动、眨眼、变形都能立刻反映出来。 */
-            long key = Key(f);
-
-            if (key != _geomKey)
-            {
-                _geomKey = key;
-
-                _modelVisual.Content = Pet3D.Scene(f);
-            }
-
-            _shift.X = f.OffsetX;
-            _shift.Y = f.OffsetY;
-        }
-
-        static long Q(double v, double step)
-        {
-            return (long)Math.Round(v / step);
-        }
-
-        static long Mix(long a, long b)
-        {
-            return a * 73856093L ^ b * 19349663L;
-        }
-
-        static long Key(PetFrame f)
-        {
-            long k = Mix(Q(f.GazeX, 0.004), Q(f.GazeY, 0.004));
-            k = Mix(k, Q(f.Yaw, 0.02));
-            k = Mix(k, Q(f.Pitch, 0.01));
-            k = Mix(k, (long)f.Expression);
-            k = Mix(k, Q(f.Lid, 0.01));
-            k = Mix(k, Q(f.ShapeIndex, 0.004));
-            k = Mix(k, Q(f.MorphAmount, 0.004));
-            k = Mix(k, Q(f.SquashX, 0.0016));
-            k = Mix(k, Q(f.SquashY, 0.0016));
-            k = Mix(k, Q(f.Zoom, 0.003));
-            k = Mix(k, Q(f.Roll, 0.01));
-            k = Mix(k, Q(f.OffsetX, 0.5));
-            k = Mix(k, Q(f.OffsetY, 0.5));
-            if (f.HasEyePose)
-            {
-                k = Mix(k, Q(f.LeftEye.Width, 0.003));
-                k = Mix(k, Q(f.LeftEye.Height, 0.003));
-                k = Mix(k, Q(f.LeftEye.Tilt, 0.005));
-                k = Mix(k, Q(f.LeftEye.OffsetY, 0.003));
-                k = Mix(k, Q(f.RightEye.Width, 0.003));
-                k = Mix(k, Q(f.RightEye.Height, 0.003));
-                k = Mix(k, Q(f.RightEye.Tilt, 0.005));
-                k = Mix(k, Q(f.RightEye.OffsetY, 0.003));
-            }
-            return k;
         }
 
         /* ------------------------------------------------------------ 命中与拖动 */
@@ -498,8 +437,8 @@ namespace WinIsland
                 {
                     _dragFollow = false;
                     _dragFiles = false;
-                    _runtime.LookAway();
-                    Trace("drag follow ended look=" + _runtime.LookWeight.ToString("0.00"));
+                    _stage.LookAway();
+                    Trace("drag follow ended look=" + _stage.LookWeight.ToString("0.00"));
                 }
                 else
                 {
@@ -510,9 +449,9 @@ namespace WinIsland
                         _followLogX = cursorX; _followLogY = cursorY;
                         Trace("follow local=" + dx.ToString("0.0") + "," + dy.ToString("0.0")
                               + " dist=" + dist.ToString("0.0")
-                              + " gaze=" + _runtime.Frame.GazeX.ToString("0.00") + ","
-                              + _runtime.Frame.GazeY.ToString("0.00")
-                              + " look=" + _runtime.LookWeight.ToString("0.00"));
+                              + " gaze=" + _stage.Frame.GazeX.ToString("0.00") + ","
+                              + _stage.Frame.GazeY.ToString("0.00")
+                              + " look=" + _stage.LookWeight.ToString("0.00"));
                     }
                 }
             }
@@ -525,7 +464,7 @@ namespace WinIsland
         {
             double gx, gy;
             LookDirection(dx, dy, out gx, out gy);
-            _runtime.LookAt(gx, gy);
+            _stage.LookAt(gx, gy);
         }
 
         void EndPress(bool inside)
@@ -592,7 +531,7 @@ namespace WinIsland
             bool files = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
             LookAtScreenDip(e.GetPosition(this), files);
             Trace("drag enter files=" + files + " follow=" + _dragFiles
-                  + " look=" + _runtime.LookWeight.ToString("0.00")
+                  + " look=" + _stage.LookWeight.ToString("0.00")
                   + " formats=[" + (e.Data == null ? "null" : string.Join(",", e.Data.GetFormats())) + "]");
             e.Effects = DragDropEffects.None;
             e.Handled = true;
@@ -612,7 +551,7 @@ namespace WinIsland
             {
                 /* 拖的是文本 / 链接之类：不跟手，并且保证上一轮的权重归零 */
                 _dragFiles = false;
-                _runtime.LookAway();
+                _stage.LookAway();
             }
         }
 
@@ -626,9 +565,9 @@ namespace WinIsland
             {
                 _lookLogX = p.X; _lookLogY = p.Y;
                 Trace("drag over p=" + Math.Round(p.X, 1) + "," + Math.Round(p.Y, 1)
-                      + " gaze=" + _runtime.Frame.GazeX.ToString("0.00") + ","
-                      + _runtime.Frame.GazeY.ToString("0.00")
-                      + " look=" + _runtime.LookWeight.ToString("0.00"));
+                      + " gaze=" + _stage.Frame.GazeX.ToString("0.00") + ","
+                      + _stage.Frame.GazeY.ToString("0.00")
+                      + " look=" + _stage.LookWeight.ToString("0.00"));
             }
             e.Effects = DragDropEffects.None;
             e.Handled = true;
@@ -643,7 +582,7 @@ namespace WinIsland
         void OnDropFiles(object sender, DragEventArgs e)
         {
             /* 不接受：回答 None，和改动前（AllowDrop=false 时 WPF 自己的回答）一致 */
-            Trace("drop refused look=" + _runtime.LookWeight.ToString("0.00"));
+            Trace("drop refused look=" + _stage.LookWeight.ToString("0.00"));
             DragDropped();
             e.Effects = DragDropEffects.None;
             e.Handled = true;
@@ -658,13 +597,13 @@ namespace WinIsland
             if (_dragFiles)
             {
                 _dragFollow = true;
-                Trace("drag leave -> follow continues look=" + _runtime.LookWeight.ToString("0.00"));
+                Trace("drag leave -> follow continues look=" + _stage.LookWeight.ToString("0.00"));
             }
             else
             {
                 /* 非文件拖拽：本来就没跟，这里保证权重一定是 0 */
                 _dragFollow = false;
-                _runtime.LookAway();
+                _stage.LookAway();
             }
         }
 
@@ -672,7 +611,7 @@ namespace WinIsland
         {
             _dragFiles = false;
             _dragFollow = false;
-            _runtime.LookAway();
+            _stage.LookAway();
         }
 
         /* 偏移 → 视线方向：+X 向右、+Y 向上（Pet3D 的 Y 轴朝上，
@@ -693,7 +632,7 @@ namespace WinIsland
             const double centre = Size / 2.0;
             double gx, gy;
             LookDirection(p.X - centre, p.Y - centre, out gx, out gy);
-            _runtime.LookAt(gx, gy);
+            _stage.LookAt(gx, gy);
         }
 
         /* ------------------------------------------------------------ 日志 */
@@ -1054,7 +993,7 @@ namespace WinIsland
                 visualProbe.Expression = PetExpression.Neutral;
                 visualProbe.GazeX = 0.85;
                 visualProbe.GazeY = 0.35;
-                Apply(visualProbe);
+                _stage.ApplyFrame(visualProbe);
 
                 /* 像素检查：垫一块纯品红在下面 */
                 Window probe = new Window();

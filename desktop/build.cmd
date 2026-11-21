@@ -94,9 +94,11 @@ rem to stay identical in both build scripts.
   "%PET%\PetShape.cs" ^
   "%PET%\PetAnim.cs" ^
   "%PET%\Pet3D.cs" ^
+  "%PET%\PetStage.cs" ^
   "%PET%\Pet.cs" ^
   PetController.cs ^
   IslandWindow.cs ^
+  PetIsland.cs ^
   Program.cs
 
 set "RC=%ERRORLEVEL%"

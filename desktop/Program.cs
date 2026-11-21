@@ -62,6 +62,9 @@ namespace WinIsland
             /* 这一次启动不要桌宠。只作用于本次，不写 ui.txt ——
                验收脚本用它拿到「只有岛」的画面，不能因此改掉用户的偏好。 */
             bool noPet = Flag(args, "--no-pet");
+            /* 岛内集成版桌宠的取证跑法：自渲染 + 像素度量 + JSON/PNG，
+               只验收集成版，独立 demo 不在这条路上。 */
+            bool petProbe = Flag(args, "--pet-probe");
             int freezeShot = 0;
             string freezeArg = Arg(args, "--freeze-shot", "");
             if (freezeArg != "") { int.TryParse(freezeArg, out freezeShot); }
@@ -72,7 +75,7 @@ namespace WinIsland
             bool diagnostic = selftest || wdaProbe || liveProbe || heartbeat
                               || freezeShot > 0 || todoOpen
                               || notify || notifyTest || notifyTrace
-                              || excludeCapture;
+                              || excludeCapture || petProbe;
             bool petAuto = !diagnostic && !noPet;
 
             IslandApp app = new IslandApp();
@@ -116,7 +119,7 @@ namespace WinIsland
                 /* 正常启动：先建岛，岛 Loaded 之后再按偏好拉桌宠（见 IslandWindow.OnLoaded）。
                    顺序不能反 —— 桌宠是 topmost，先建它再建岛，用户看到的第一帧里
                    岛要从桌宠背后弹出来，观感是「桌宠被压了一下」。 */
-                IslandWindow win = new IslandWindow(look, scene, art, state, selftest, log, wdaProbe, noWda, excludeCapture, liveProbe, freezeShot, heartbeat, todoOpen, notify || notifyTest, notifyTest, notifyTrace, petAuto);
+                IslandWindow win = new IslandWindow(look, scene, art, state, selftest, log, wdaProbe, noWda, excludeCapture, liveProbe, freezeShot, heartbeat, todoOpen, notify || notifyTest, notifyTest, notifyTrace, petAuto, petProbe);
                 win.Show();
             };
 

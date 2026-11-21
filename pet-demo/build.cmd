@@ -20,7 +20,7 @@ pushd "%~dp0"
   /r:"%FW%\System.Drawing.dll" ^
   /r:"%FW%\System.Windows.Forms.dll" ^
   /resource:grok-clips.json,WinIsland.grok-clips.json ^
-  DemoSupport.cs AnimationCore.cs PetClips.cs ReferenceClips.cs PetShape.cs PetAnim.cs Pet3D.cs Pet.cs Program.cs
+  DemoSupport.cs AnimationCore.cs PetClips.cs ReferenceClips.cs PetShape.cs PetAnim.cs Pet3D.cs PetStage.cs Pet.cs Program.cs
 set "RC=%ERRORLEVEL%"
 popd
 if not "%RC%"=="0" exit /b %RC%

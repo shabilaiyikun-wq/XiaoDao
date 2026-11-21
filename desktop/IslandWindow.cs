@@ -16,7 +16,7 @@ using Path = System.Windows.Shapes.Path;
 
 namespace WinIsland
 {
-    class IslandWindow : Window
+    partial class IslandWindow : Window
     {
         /* 窗口留白：给落影和阴影描边用 */
         const double MX = 24, MT = 16, MB = 34;
@@ -155,6 +155,9 @@ namespace WinIsland
            每次动作后跟 PetController.IsOn 对齐，避免两边各记一套状态。 */
         bool _petAuto;
         bool _petOn;
+        /* --pet-probe：岛内集成版的取证跑法。不靠抓屏猜，直接把可视树渲成位图，
+           按 DIP 量球径、眼睛、遮挡；跑完写 JSON + PNG + ASCII 并退出。 */
+        bool _petProbe;
 
         /* 已经在走退出流程。BeginShutdown 会先立这个旗，
            免得 Closed 事件里的 OnIslandClosed 再走一遍释放 + Shutdown。 */
@@ -216,7 +219,7 @@ namespace WinIsland
                             bool excludeCapture,
                             bool liveProbe, int freezeShot, bool heartbeat, bool todoOpen,
                             bool notify, bool notifyTest, bool notifyTrace,
-                            bool petAuto)
+                            bool petAuto, bool petProbe)
         {
             _heartbeat = heartbeat;
             _notify = notify;
@@ -227,6 +230,7 @@ namespace WinIsland
             _liveProbe = liveProbe;
             _freezeShot = freezeShot;
             _petAuto = petAuto;
+            _petProbe = petProbe;
             _petOn = PetController.IsOn;
             _lookKey = look;
             _scene = scene;
@@ -252,6 +256,19 @@ namespace WinIsland
                显式传了就固定住——验收脚本靠这个拿到可重复的几何。 */
             _pinnedState = state != null && state != "auto";
             _state = _pinnedState ? state : "idle";
+
+            /* 探针自己驱动层状态。两个要点：
+               · 不钉层 —— 钉住的 compact 是 define 里的 200×38，而规格要验的是
+                 「自动播放」那一档 112×38，所以 _pinnedState 必须为 false；
+               · 但悬停/数据轮询一律不许改层：鼠标恰好停在岛上就会把摆好的
+                 那一层顶掉，量出来的就不是要验的那一层。锁在构造里就上好，
+                 因为 16ms 命中计时器的第一拍可能抢在 BeginInvoke 之前跑。 */
+            if (_petProbe)
+            {
+                _pinnedState = false;
+                _state = "idle";
+                _petProbeLock = true;
+            }
             _selftest = selftest;
             _logPath = logPath;
 
@@ -331,10 +348,31 @@ namespace WinIsland
             if (_closing) return;
             _closing = true;
             Trace("island window closed externally -> releasing pet and shutting down");
+            /* 集成版的球就在这棵树上：摘掉它、停掉计时器和每帧回调，
+               顺带把还给独立窗口诊断模式的 PetController 也收掉。 */
+            ReleasePet();
             PetController.Release();
-            _petOn = false;
+            StopTimersForShutdown();
             try { if (Application.Current != null) Application.Current.Shutdown(); }
             catch (Exception ex) { Trace("shutdown after external close failed: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// 把挂在 Dispatcher 上的计时器全停掉。
+        ///
+        /// 不做这一步，「关窗」之后就还剩三个活着的 timer 在叫：数据轮询、
+        /// 命中轮询、实时桌面采样。它们各自持有 this，Dispatcher 又把 timer 只当
+        /// 普通对象引用 —— 进程看起来退出了，实际要等下一次 tick 才发现没人要它。
+        /// </summary>
+        void StopTimersForShutdown()
+        {
+            /* _dataTimer 的 Tick 是匿名委托，摘不掉 —— Stop 就够：
+               停止的 DispatcherTimer 不再是 Dispatcher 的工作项，
+               它持有的闭包也就没有下一拍可跑。 */
+            if (_dataTimer != null) { _dataTimer.Stop(); _dataTimer = null; }
+            if (_hitTimer != null) { _hitTimer.Stop(); _hitTimer.Tick -= OnHitTick; _hitTimer = null; }
+            StopLiveBackdrop();
+            StopAnimating();
         }
 
         /* ------------------------------------------------------------ 视觉树 */
@@ -493,6 +531,10 @@ namespace WinIsland
             _ballDock.Children.Add(_ball);
 
             _root.Children.Insert(_root.Children.IndexOf(_host), _ballDock);
+
+            /* 桌宠的两个槽位（岛内 / 岛下）。放在最后建：它要往 _root 和
+               _host 里各插一层，前面几层的顺序才算定了 —— 见 PetIsland.cs。 */
+            BuildPetLayers();
         }
 
         static Rectangle MakeRect()
@@ -689,6 +731,10 @@ namespace WinIsland
             {
                 Dispatcher.BeginInvoke(new Action(async () => await RunSelfTest()));
             }
+            else if (_petProbe)
+            {
+                Dispatcher.BeginInvoke(new Action(async () => await RunPetProbe()));
+            }
             else
             {
                 /* 按启动参数决定入场方式：要展开就先落紧凑再弹开，让第一眼就是动的 */
@@ -726,6 +772,11 @@ namespace WinIsland
            提醒只做一次（Todos.TakeDue 里标记 Alerted）。 */
         void TickTodoDue()
         {
+            /* 探针要量的是「层 ↔ 球」的对应关系。用户真实的待办到点了会把层
+               压成 expanded（见下），正好落在探针摆好第一层之后 —— 量出来的
+               就不是第一层了。探针期间不提醒，也不动用户的待办数据。 */
+            if (_petProbe) return;
+
             TodoItem due = Todos.TakeDue();
             if (due == null) return;
 
@@ -824,8 +875,13 @@ namespace WinIsland
         void SyncWindowSize()
         {
             SceneDef def = Scenes.Get(_scene);
-            /* 开了消息提醒才预留右侧那颗球的位置：默认用户看不到任何区别。 */
-            double nw = def.ExpW + MX * 2 + (_notify ? NotifyReserve : 0);
+            /* 开了消息提醒才预留右侧那颗球的位置：默认用户看不到任何区别。
+               桌宠的停靠位同理 —— **只在实际开着的时候**才预留。恒留会让
+               窗口比原来宽 47.6 DIP，岛在窗口里的偏移跟着变，既有验收脚本
+               按「窗口 = ExpW + 48」量出来的像素位置就整体偏了；
+               桌宠关着的时候（也是验收脚本跑的默认形态）必须和改之前逐像素一致。 */
+            double nw = def.ExpW + MX * 2 + (_notify ? NotifyReserve : 0)
+                        + (_petOn ? PetReserve : 0);
             double nh = def.ExpH + MT + MB;
             bool first = !_sized;
 
@@ -884,8 +940,16 @@ namespace WinIsland
             double bt = ClampD(_anchorTop, vt, vb - h);
 
             /* 窗口：按展开态预留，形变中不动。
-               展开时 ebl/ebt 就是岛体落点，所以岛在窗口内正好回到 MX / MT。 */
-            double wl = ClampD(ClampD(_anchorX - def.ExpW / 2, vl, vr - def.ExpW) - MX, vl, vr - Width);
+               展开时 ebl/ebt 就是岛体落点，所以岛在窗口内正好回到 lead / MT。
+
+               lead 里的 PetReserve 是**桌宠那一侧的预留加在左边**：
+               窗口向左长 PetReserve，_ix 同步右移同样的量（因为 _ix 是
+               「岛体左边 - 窗口左边」），于是岛在屏幕上的位置一点不动，
+               只是它左边多出 47.6 DIP 的空位给球站。
+               球径 33.6 + 间隙 8 需要 41.6，而展开态原本左侧只有 MX=24 —— 
+               不加这块预留，球在第三层就没地方站，只能被挤到右边去。 */
+            double lead = MX + (_petOn ? PetReserve : 0);
+            double wl = ClampD(ClampD(_anchorX - def.ExpW / 2, vl, vr - def.ExpW) - lead, vl, vr - Width);
             double wt = ClampD(ClampD(_anchorTop, vt, vb - def.ExpH) - MT, vt, vb - Height);
 
             double oix = _ix, oiy = _iy;
@@ -921,6 +985,7 @@ namespace WinIsland
             Canvas.SetLeft(_shD, _ix); Canvas.SetTop(_shD, _iy + 6);
             _curIx = _ix; _curIy = _iy;
             UpdateRefract();
+            PlacePet();
         }
 
         /* 拖动改的是锚点，不是窗口。
@@ -1017,6 +1082,8 @@ namespace WinIsland
         void Reconcile()
         {
             if (_pinnedState) return;
+            /* 探针期间层状态由探针脚本驱动，数据轮询不许插手 */
+            if (_petProbeLock) return;
 
             /* 待办提醒压层：截止前不收回（悬停也照旧撑着，那是下面的 hover 规则）。
                截止后先把场景还原，再往下走正常的层级判定 —— 不能只清标记，
@@ -1270,6 +1337,10 @@ namespace WinIsland
         void SetState(string next, bool immediate)
         {
             if (next == _state && !immediate) return;
+            /* 层变化是这一版最容易被间接路径改掉的东西（悬停、数据轮询、待办提醒、
+               贴合动画）。留一行日志，出问题时能直接看出是谁改的，不用猜。 */
+            Trace("state " + _state + " -> " + next + (immediate ? " (immediate)" : "")
+                  + (_petProbeLock ? " [probe-locked]" : ""));
             _state = next;
 
             double tw, th;
@@ -1286,6 +1357,11 @@ namespace WinIsland
 
             Rebuild(immediate);
             Apply();
+
+            /* 切层就是「球该在哪儿」这件事变了：第一层回岛内，其余两层出场。
+               紧跟着一起推进，避免出现「岛已经是第二层、球却还在岛内」的一帧。
+               immediate 的那几处（启动、拖动结束）直接落位，不做过渡。 */
+            if (_petOn) PetLinkTo(PetTargetLink, immediate);
         }
 
         void StartAnimating()
@@ -1334,10 +1410,13 @@ namespace WinIsland
             UpdateSpecularFromCursor();
             Apply();
 
-            /* 球的动画独立于岛体 spring：岛早就 settled 了，球可能还在飞。 */
+            /* 球的动画独立于岛体 spring：岛早就 settled 了，球可能还在飞。
+               集成版这里还带上了桌宠 —— 岛和球共用这一次 tick（一套更新循环）。 */
             if (_ballStartMs >= 0) ApplyBallAnim();
+            AdvancePet(now);
 
-            if (_w.Settled && _h.Settled && _ballStartMs < 0)
+            if (_w.Settled && _h.Settled && _ballStartMs < 0 && !PetWantsFrames
+                && !_petTween)
             {
                 if (_morphing)
                 {
@@ -1428,6 +1507,10 @@ namespace WinIsland
             Canvas.SetLeft(_shB, ix); Canvas.SetTop(_shB, iy + 5);
             Canvas.SetLeft(_shC, ix); Canvas.SetTop(_shC, iy + 9);
             Canvas.SetLeft(_shD, ix); Canvas.SetTop(_shD, iy + 6);
+
+            /* 岛体几何变了，桌宠的落点和裁剪也要跟着走 —— 这一句不能少，
+               否则贴边/形变时球会停在旧位置上（球在窗口里，窗口本身没动）。 */
+            PlacePet();
         }
 
         /* 压在折射之上的那一层，对应岛体的 RefractWash + 竖向 tint：
@@ -1714,108 +1797,9 @@ namespace WinIsland
 
         /* ------------------------------------------------------------ 桌宠
 
-           桌宠和岛是同一个进程里的两个窗口：岛不动、不接管、不当 Owner
-           （见 PetController 头部）。这里只做三件事 —— 把菜单动作转给控制器、
-           把勾选态同步回来、把「用户开关」写进偏好。
-
-           为什么每个动作都要先 EnsurePet：菜单里「戳击」在桌宠关着的时候点下去，
-           用户的意图显然是「让桌宠戳一下」，不是「点了没反应」。所以先开后戳。
-           这条只对**用户主动点的菜单项**成立 —— 自动启用那条路（OnLoaded）不会
-           走到这里，诊断模式仍然一个桌宠都不弹。 */
-
-        void EnablePet()
-        {
-            if (!PetController.Enable()) { _petOn = PetController.IsOn; return; }
-            _petOn = true;
-            Prefs.Pet = true;
-            Prefs.Save(_scene, _lookKey, _artKey);
-            Trace("pet enabled (pref saved)");
-        }
-
-        /* 启动时按偏好拉桌宠 —— 和 EnablePet 的区别只有一个：**不写 ui.txt**。
-           这一路是「照用户上次的意愿执行」，不是「用户改了意愿」。把它也写成一次
-           Save，等于每次开机都把默认值固化进文件：用户从没表过态，文件里却先有了
-           pet=1，「默认」和「选择」从此分不开，也让「启动不改盘」这条性质失守。
-           真正的选择只发生在菜单「启用桌宠」那一项和 EnsurePet（用户点动作）上。 */
-        void EnablePetByPreference()
-        {
-            if (!PetController.Enable()) { _petOn = PetController.IsOn; return; }
-            _petOn = true;
-            Trace("pet enabled by preference (ui.txt untouched)");
-        }
-
-        void DisablePet()
-        {
-            /* 只有真的关掉了一个在跑的桌宠，才把 pet=0 写进偏好。
-               原来无条件写：勾选态万一陈旧（_petOn 说 true、实际没窗），
-               点一下「启用桌宠」界面毫无变化，磁盘上的偏好却被改成「用户不想要」。
-               用户偏好是给下次启动读的，不该被一次空操作改掉。 */
-            bool was = PetController.Disable();
-            _petOn = false;
-            if (!was) { Trace("pet already off (pref untouched)"); return; }
-            Prefs.Pet = false;
-            Prefs.Save(_scene, _lookKey, _artKey);
-            Trace("pet disabled (pref saved)");
-        }
-
-        void TogglePet()
-        {
-            if (_petOn || PetController.IsOn) DisablePet();
-            else EnablePet();
-        }
-
-        /// <summary>动作前保证桌宠活着。返回 false 表示这次确实没能拉起（建窗失败）。</summary>
-        bool EnsurePet()
-        {
-            if (PetController.IsOn) { _petOn = true; return true; }
-            if (!PetController.Enable()) return false;
-            _petOn = true;
-            Prefs.Pet = true;
-            Prefs.Save(_scene, _lookKey, _artKey);
-            Trace("pet enabled by action (pref saved)");
-            return true;
-        }
-
-        void PetPoke()
-        {
-            if (!EnsurePet()) { Trace("pet poke skipped: not running"); return; }
-            PetController.Poke();
-        }
-
-        void PetSpin()
-        {
-            if (!EnsurePet()) { Trace("pet spin skipped: not running"); return; }
-            PetController.Spin();
-        }
-
-        void PetSetState(string state)
-        {
-            if (!EnsurePet()) { Trace("pet state skipped: not running"); return; }
-            PetController.SetState(state);
-            Trace("pet state -> " + state);
-        }
-
-        void PetPlayClip(string clip)
-        {
-            if (!EnsurePet()) { Trace("pet clip skipped: not running"); return; }
-            if (!PetController.PlayClip(clip)) Trace("pet clip failed: " + clip);
-            else Trace("pet clip -> " + clip);
-        }
-
-        void PetRandomIdle()
-        {
-            if (!EnsurePet()) { Trace("pet idle skipped: not running"); return; }
-            PetController.RandomIdle();
-            Trace("pet idle (random pool)");
-        }
-
-        /* 菜单勾选用的当前态。桌宠没开时返回空串，于是「表情模式」和
-           「全部动画」里的勾选全灭 —— 这比留着上一次的勾更诚实。 */
-        string PetStateKey()
-        {
-            _petOn = PetController.IsOn;
-            return _petOn ? PetController.State : "";
-        }
+           桌宠现在是岛内集成的：球和岛体在同一棵可视树里，只有一个窗口
+           （见 PetIsland.cs）。下面这些动作全部转给那套实现 ——
+           PetController / PetWindow 只留给 --pet* 那几个独立窗口的诊断模式用。 */
 
         /* 兜底入口：资源管理器里 Ctrl+C 复制文件之后，从菜单直接暂存。
 
@@ -2001,7 +1985,11 @@ namespace WinIsland
             SizeOf(_state, out tw, out th);
 
             _content.Children.Clear();
-            Built built = Layout.Build(_scene, _state, tw, th, look, art, _snap, Actions(), !_pinnedState);
+            /* petDocked：第一层那颗原球不画，位置让给桌宠。
+               只在「桌宠开着 + 正好是 idle」时留白 —— 其余情况原球照旧，
+               这样关掉桌宠、或者还停在第二/三层时，界面和以前逐像素一致。 */
+            bool petDocked = _petOn && _state == "idle";
+            Built built = Layout.Build(_scene, _state, tw, th, look, art, _snap, Actions(), !_pinnedState, petDocked);
             _content.Children.Add(built.Root);
             _built = built;
 
@@ -2340,6 +2328,11 @@ namespace WinIsland
                       + " island=" + Math.Round(w, 1) + "x" + Math.Round(h, 1)
                       + " win=" + Math.Round(Left, 1) + "," + Math.Round(Top, 1)
                       + " dpi=" + _dpi.ToString("0.###"));
+                /* 探针期间层状态由探针自己走：鼠标恰好停在岛上时，悬停会把好不容易
+                   摆好的第二层又展开掉，量出来的就不是探针要的那一层了。
+                   这里只挡「悬停改层」，穿透/命中/投放一律照旧。 */
+                if (_petProbeLock) return;
+
                 if (inside) { if (_state == "compact" || _state == "idle") SetState("expanded", false); }
                 else { if (_state == "expanded") Reconcile(); }
             }
@@ -3383,17 +3376,15 @@ namespace WinIsland
         {
             if (_closing) return;
             _closing = true;
-            if (_hitTimer != null) _hitTimer.Stop();
-            StopLiveBackdrop();
-            StopAnimating();
-            /* 退出岛必须把桌宠一起收干净：窗口、两个 DispatcherTimer、
-               CompositionTarget.Rendering 上的每帧委托、秒表。漏一样的后果是
-               进程退不干净（Rendering 是静态事件，会当 GC 根把窗口钉住）。
+            ReleasePet();
+            StopTimersForShutdown();
+            /* 退出岛必须把桌宠一起收干净：Shell 从可视树摘下来、runtime 不再推进、
+               每帧委托和三个 DispatcherTimer 都停掉。漏一样的后果是进程退不干净
+               （Rendering 是静态事件，会当 GC 根把窗口钉住）。
                PetController 自己也挂了 Application.Exit 兜底 —— 那条覆盖
                自检/抓帧/WDA 探针那几条直接调 Shutdown 的路；这里显式释放是为了
                「用户点退出」这条主路径不依赖兜底。重复调用是幂等的。 */
             PetController.Release();
-            _petOn = false;
             Application.Current.Shutdown();
         }
     }

@@ -1,0 +1,10 @@
+{ "ok": true,
+  "layer1": { "ok": true, "state": "idle", "petT": 0.000, "slot": "dock", "side": -1, "islandDip": [52.0,30.0], "islandAtDip": [271.600,16.000], "diameterDip": 16.667, "centerDip": [297.667,31.000], "petPixels": 473, "purpleInIsland": 473, "purpleOutIsland": 0, "eyePixels": 24, "eyeBoxDip": [6.000,4.000], "orbPixels": 0, "blobs": 1, "fails": "" },
+  "idle_to_compact": { "ok": true, "frames": 243, "pixelSamples": 5, "maxBlobs": 1, "maxDtSec": 0.0439, "maxDiaStepDip": 3.222, "maxCenterStepDip": 15.556, "maxOpacityStep": 0.248, "slotSwitches": 1, "switchOffsetDip": 0.015, "diaFrom": 16.800, "diaTo": 33.600, "fails": "" },
+  "layer2": { "ok": true, "state": "compact", "petT": 0.440, "slot": "under", "side": -1, "islandDip": [112.0,38.0], "islandAtDip": [241.600,16.000], "diameterDip": 34.000, "centerDip": [217.000,35.000], "petPixels": 1863, "purpleInIsland": 0, "purpleOutIsland": 1863, "eyePixels": 118, "eyeBoxDip": [13.333,8.667], "orbPixels": 792, "blobs": 1, "fails": "" },
+  "layer3": { "ok": true, "state": "expanded", "petT": 0.440, "slot": "under", "side": -1, "islandDip": [452.0,206.0], "islandAtDip": [71.600,16.000], "diameterDip": 33.333, "centerDip": [46.667,119.000], "petPixels": 1888, "purpleInIsland": 0, "purpleOutIsland": 1888, "eyePixels": 96, "eyeBoxDip": [13.333,7.333], "orbPixels": 18529, "blobs": 1, "fails": "" },
+  "expanded_to_idle": { "ok": true, "frames": 266, "pixelSamples": 5, "maxBlobs": 1, "maxDtSec": 0.0500, "maxDiaStepDip": 1.996, "maxCenterStepDip": 15.691, "maxOpacityStep": 0.225, "slotSwitches": 1, "switchOffsetDip": 0.000, "diaFrom": 33.600, "diaTo": 16.800, "fails": "" },
+  "layer1return": { "ok": true, "state": "idle", "petT": 0.000, "slot": "dock", "side": -1, "islandDip": [52.0,30.0], "islandAtDip": [271.600,16.000], "diameterDip": 16.667, "centerDip": [297.667,31.000], "petPixels": 471, "purpleInIsland": 471, "purpleOutIsland": 0, "eyePixels": 25, "eyeBoxDip": [6.000,4.667], "orbPixels": 0, "blobs": 1, "fails": "" },
+  "screenShot": true,
+  "actions": { "ok": true, "state": "idle", "stageFrames": 284, "pokeMoved": true, "spinMoved": true, "fails": "" }
+}

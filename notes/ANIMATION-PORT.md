@@ -247,6 +247,10 @@ csc /target:exe /platform:x64 /out:..\notes\probes\probe-petclose.exe /codepage:
 
 ### 8.2 桌面窗口
 
+> **已被第 10 节取代。** 集成版不再有独立桌宠窗口：桌宠是岛可视树里的一个节点，
+> 遮挡由绘制顺序保证，不靠两个 `Topmost` 争 z-order。本节保留下来是因为
+> `desktop\PetController.cs` 还在，`--pet*` 那几条诊断路径仍在用独立窗口。
+
 - 两个窗口**同一个进程**：岛（无标题，`HwndWrapper[WinIsland.exe;…]`）与桌宠
   （`Title="桌宠"`，220×220 DIP）。
 - 桌宠**不设 Owner**。设了之后它会被岛的关闭/最小化带着走，而且 WPF 会做
@@ -254,6 +258,11 @@ csc /target:exe /platform:x64 /out:..\notes\probes\probe-petclose.exe /codepage:
 - 位置分开存：岛 `%APPDATA%\WinIsland\window.txt`，桌宠 `…\pet.txt`，互不覆盖。
 
 ### 8.3 代码入口
+
+> **集成版的路由见第 10 节。** 下表中 `PetController.cs` 一行已不再参与
+> 主路径：桌面端菜单动作现在直接调 `PetIsland.cs` 里的 `PetPoke` /
+> `PetSpin` / `PetSetState` / `PetPlayClip` / `PetRandomIdle`，
+> 它们驱的是岛自己那个 `PetStage`。`PetController` 只留给 `--pet*` 诊断。
 
 | 位置 | 职责 |
 |---|---|
@@ -269,6 +278,10 @@ csc /target:exe /platform:x64 /out:..\notes\probes\probe-petclose.exe /codepage:
 
 ### 8.4 释放
 
+> **集成版的释放见 10.7。** 集成版没有第二个窗口，`PetController` 那条
+> `Application.Exit` 兜底对它不适用；真正管事的是 `ReleasePet()` +
+> `StopTimersForShutdown()`。
+
 `PetController` 在第一次 `Enable()` 时往 `Application.Exit` 挂一次钩子，
 覆盖岛那六条 `Shutdown` 路径（菜单退出、自检结束、抓帧结束、WDA 探针、采样探针、
 以及窗口被外部关掉）。`BeginShutdown()` 也显式 `Release()` 一次 —— 重复调用幂等。
@@ -283,3 +296,171 @@ csc /target:exe /platform:x64 /out:..\notes\probes\probe-petclose.exe /codepage:
   `csc.exe` 一步编完。
 - 桌宠的「启用」开关只在右键菜单里，没有托盘图标，也没有快捷键。
 - 28 段动画没有预览缩略图，只有名字。
+
+## 10. 第三阶段：并进岛的那一层合成（已完成；**第 8.2 节「两个窗口」已被本节取代**）
+
+这一阶段把桌宠从「另一个置顶窗口」改成「岛自己可视树里的一个节点」。
+
+### 10.1 为什么必须改
+
+第 8 阶段的两个窗口都是 `Topmost`。`Topmost` 在 Win32 里不是一个全局序，
+而是「一大票置顶窗口内部的先后」，这个先后由**最后一次 `SetWindowPos`、
+激活、以及系统自己的排队**共同决定。两件事因此无法保证：
+
+1. 岛体**遮挡**球这件事。需求是「出场时球先在岛体后方，被岛挡住，
+   移出边界之后才显露」。两个独立窗口做不到「挡住」——后置顶的那个必然
+   盖住另一个整体，包括本该被遮住的部分。
+2. 顺序稳定。用户点了别的窗口、切了桌面、系统重排 z-order 之后，
+   岛的球跑到岛前面是随机的。
+
+所以集成版只有**一个**窗口、一层合成：遮挡由 WPF 的绘制顺序保证，
+不依赖任何 `Topmost` 的胜负。
+
+### 10.2 一套合成、两个 z 槽
+
+`_root`（岛窗口的根 Canvas）里现在插了两个槽位：
+
+```
+_root
+ ├─ _shadowLayer
+ ├─ _petUnder      ← 岛体**之前**：这里画出来的东西会被岛体挡住（真遮挡）
+ ├─ _ballDock
+ ├─ _host         ← 岛体本体（含 Squircle 圆角裁剪）
+ │   ├─ _refract / _wash / _tint / _spec / _glow / _grain / _edge
+ │   ├─ _petDock   ← 岛体**之内**：继承岛的圆角裁剪，于是「藏在岛里」是免费的
+ │   └─ _content
+ └─ …
+```
+
+- **第一层（idle）**把球放在 `_petDock`。它是 `_host` 的子节点，而 `_host`
+  有 `Clip = Squircle.Build(...)`，所以球超出岛体轮廓的部分**自动被裁掉**：
+  「藏在岛内」不需要额外代码，也不需要额外的不透明度技巧。
+- **第二、三层**把球放到 `_petUnder`。它在 `_host` 之前，于是岛体
+  在它上面绘制 → 球被岛真的挡住。显露时机由 `UpdatePetUnderClip` 控制：
+  把窗口矩形减去「膨胀过的岛体轮廓」得到裁剪域，球只在这块区域里可见。
+  轮廓几何按量化后的尺寸缓存，避免每帧重建。
+- 只有一个 `Shell`（`PetStage` 的 `Viewport3D`），换层时**改父节点**，
+  绝不复制。于是「不能同时出现两个球」「不能留残影」是由结构保证的，
+  不是靠时序小心维持的。
+
+### 10.3 一套动画、一个更新循环
+
+`PetStage`（`pet-demo\PetStage.cs`）把「3D 场景 + `PetAnimationRuntime` +
+相机/位移/去重」收成一个可复用的部件。岛持有**一个** `PetStage`，
+由岛本来就有的 `OnFrame`（`CompositionTarget.Rendering`）推进：
+
+```
+IslandWindow.OnFrame → AdvancePet(now) → _petStage.Advance(dt) → PlacePet()
+```
+
+没有为「岛内那颗」和「出场那颗」各起一套动画、各挂一个 Rendering 回调 ——
+那正是需求里明确要避免的东西。`AdvancePet` 里有 60fps 闸门，
+`PetAnimationRuntime` 自己是 1/120 定步长，所以帧率变化不影响动作速度。
+
+### 10.4 尺寸：原球多大就多大
+
+第一层的球径取岛第一层原球的**实测可见直径**：
+
+```
+Layout.IdleOrbSize(w, h) = min(w, h) * IdleOrbRatio   // IdleOrbRatio = 0.56
+`52 × 30` → `30 × 0.56 = 16.8 DIP`
+```
+
+依据是原球在 `52×30` 里实际占多大（不是面板尺寸，也不是猜测值）。
+被隐藏的原球是 `Ui.Orb`——`Rebuild()` 里当 `petDocked` 为真时**根本不建**
+这个节点，所以「隐藏原球」不是设透明度，而是它压根不存在。
+
+出场尺寸是它的两倍（`PetGrow = 2.0`，33.6 DIP）。`PetStage` 是按
+**相机宽度**改大小的（`_camera.Width = 2*_shellSize/_diameter`），
+不是靠 `RenderTransform` 缩放 —— 后者会把 3D 内容拉伸成软的，
+16.8 DIP 那种尺寸下糊得没法看。
+
+### 10.5 过渡：换层点选在「画面不变」的那一刻
+
+时间线 `t ∈ [0, 0.44]`：
+
+| 区间 | 槽位 | 直径 | 不透明度 | 位置 |
+|---|---|---|---|---|
+| `[0, 0.10]` | `_petDock` | 16.8 恒定 | `1 → 0` | 岛心 |
+| `[0.10, 0.44]` | `_petUnder` | `16.8 → 33.6` | 1 | 岛心 → **左侧**停靠点 |
+
+球**从岛体左边缘移出去**，停在岛左边 `PetGap` 处（实测间隙 7.6~8.0 DIP）。
+因为球先整颗在岛体轮廓里、往左移动，出轮廓的那一刻它才「显露」，
+这就是「先躲在岛后、移出边缘再出现」的实际形态。
+
+回程沿同一条曲线倒放。换层发生在 `t = 0.10`，此时：
+岛内那颗已经淡到 0，岛下那颗**整颗埋在岛体轮廓里**（球心还在岛心，
+球径 16.8 而岛体 52×30）——两边都不可见，所以换层那一刻画面上什么都不会变。
+探针把这一条量成了断言：`slotSwitches == 1` 且 `switchOffsetDip < 0.6`。
+
+> 这里曾经写过一个 bug：岛内那颗在淡出的同时缩到 78%（`d1*(1-0.22*fade)`），
+> 而岛下那颗一接手就是整尺寸 16.8，直径于是在换层那一帧硬跳 3.7 DIP。
+> 因为那一刻两边都不可见，肉眼看不出来 —— 是逐帧轨迹里的 `diaStep` 把它抓出来的。
+> 现在只淡出不缩，直径全程连续。
+
+### 10.6 窗口宽度：预留加在**左侧**，且只在实际开着时才加
+
+停靠点在岛体**左侧**（球从左边出来）`PetGap(8) + d2(33.6)` 处，所以窗口要预留
+`PetReserve = 8 + 16.8*2 + 6 = 47.6 DIP`。这块预留**只在桌宠真的开着时才加**：
+
+```csharp
+// 尺寸
+double nw = def.ExpW + MX*2 + (_notify ? NotifyReserve : 0) + (_petOn ? PetReserve : 0);
+// 位置（SyncPlacement）：窗口向左长 PetReserve，_ix 同步右移同样的量
+double lead = MX + (_petOn ? PetReserve : 0);
+double wl = ClampD(ClampD(_anchorX - def.ExpW/2, vl, vr - def.ExpW) - lead, vl, vr - Width);
+```
+
+两处都要改，只改尺寸是不够的：`_ix` 的定义是「岛体左边 − 窗口左边」，
+窗口只加宽不加 `lead` 的话，多出来的 47.6 DIP 全长在右边，球在左侧依旧没地方站
+（展开态左侧原本只有 `MX = 24`，而球要 41.6）。加了 `lead` 之后：
+
+| 状态 | `_ix`（改前 → 改后） | 左侧可用 | 右侧可用 |
+|---|---|---|---|
+| idle 52 宽 | 224 → 271.6 | 271.6 | 275.6 |
+| compact 112 宽 | 194 → 241.6 | 241.6 | 193.6 |
+| expanded 452 宽 | 24 → 71.6 | **71.6** ✔ | 23.6 |
+
+改前展开态左侧只有 24，程序只能把球挤到右边去 —— 所以「从左边出来」这件事
+不是改一个字号就能做到的，**必须同时把预留挪到左边**。
+
+恒留会让窗口比原来宽 47.6 DIP，岛在窗口里的偏移 `_ix` 跟着变，
+既有验收脚本按「窗口 = `ExpW + 48`」量出来的像素位置就整体偏 23.8 DIP。
+桌宠关着（也就是所有既有验收脚本的默认形态）时必须逐像素不变。
+开关桌宠走 `ApplyPetReserve()`：改尺寸 → `SyncWindowSize()` →
+`ForceClickThroughStyle()`（改尺寸会重建合成属性，穿透有可能被清掉）。
+
+停靠侧的选择（`PlacePet`）：**优先左边**；左侧放不下（岛贴屏幕左缘、
+窗口左边距被压没了）才退到右边，避免球被窗口边缘切掉；两侧都不够时取宽的一侧
+（窗口预留本应保证走不到这一步）。
+
+### 10.7 释放
+
+集成版**没有第二个窗口**了，所以「关岛就没有球在跑」完全取决于 `ReleasePet()`：
+
+- `Shell` 从可视树摘下（`UnmountPet`）
+- `_petStage = null`（runtime 不再被推进）
+- `PetWantsFrames` 归假 → `OnFrame` 的续跑条件不再成立，
+  `StopAnimating()` 会把 `CompositionTarget.Rendering` 摘掉
+- `StopTimersForShutdown()` 收三个 `DispatcherTimer`
+
+`BeginShutdown()` 与 `OnIslandClosed` 都调 `ReleasePet()`，重复调用幂等。
+漏掉 `Rendering` 那一环的后果很具体：它是**静态事件**，会把窗口当 GC 根钉住，
+进程退不干净。
+
+### 10.8 验收
+
+| 工具 | 管什么 |
+|---|---|
+| `WinIsland.exe --pet-probe` | 三层 + 往返 + 过渡轨迹 + 菜单动作链路，写 `pet-island-probe.{json,txt}` 与 5 张 PNG |
+| `desktop\verify\pet-island.ps1` | **从进程外面**数顶层窗口（必须恰好 1 个、且不存在标题为「桌宠」的窗口），再校验上面的 JSON |
+
+为什么窗口数要从外面数：代码里写「不再 `new PetWindow`」不算证明，
+只有 `EnumWindows` 数一遍才能确定「只有一个窗口」真的成立。
+注意用 `EnumWindows` 而不是 `Get-Process.MainWindowHandle` —— 后者只给
+「一个主窗口」，恰好会把第二个置顶窗口藏起来，而那正是要否掉的东西。
+
+过渡的平滑度**不能**靠抓像素量：软件渲染一张全尺寸窗口（`_refract` 上挂着
+模糊）要 80~300ms，实测一拍就差 0.35s，连 0.44s 的行程都解析不出来。
+所以改成记录动画自己的输出（`_petTrace`：时间线/直径/球心/不透明度/槽位），
+一次行程就有二十多帧真值；像素只用来确认「画面上确实只有一个球」。
