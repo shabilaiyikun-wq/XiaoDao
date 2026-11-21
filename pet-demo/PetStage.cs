@@ -123,6 +123,11 @@ namespace WinIsland
 
         public void SetState(string state) { _runtime.SetState(state); }
 
+        /// <summary>第三层打开期间置真：底稿钉在静止中立帧，眼睛仍跟鼠标。</summary>
+        public void Hold(bool on) { _runtime.Hold(on); }
+
+        public bool Held { get { return _runtime.Held; } }
+
         public void PlayClip(string clip) { _runtime.PlayClip(clip); }
 
         public void LookAt(double x, double y) { _runtime.LookAt(x, y); }

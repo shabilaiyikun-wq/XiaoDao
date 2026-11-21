@@ -62,6 +62,10 @@ namespace WinIsland
             /* 这一次启动不要桌宠。只作用于本次，不写 ui.txt ——
                验收脚本用它拿到「只有岛」的画面，不能因此改掉用户的偏好。 */
             bool noPet = Flag(args, "--no-pet");
+            /* --no-pet 的对称项：这一次启动**要**桌宠，同样只作用于本次、
+               不写 ui.txt。验收要在用户 pet=0 的机器上跑真实拖拽，
+               又不能为了跑一次测试去改人家的偏好 —— 所以需要这一条。 */
+            bool petOn = Flag(args, "--pet-on");
             /* 岛内集成版桌宠的取证跑法：自渲染 + 像素度量 + JSON/PNG，
                只验收集成版，独立 demo 不在这条路上。 */
             bool petProbe = Flag(args, "--pet-probe");
@@ -119,7 +123,7 @@ namespace WinIsland
                 /* 正常启动：先建岛，岛 Loaded 之后再按偏好拉桌宠（见 IslandWindow.OnLoaded）。
                    顺序不能反 —— 桌宠是 topmost，先建它再建岛，用户看到的第一帧里
                    岛要从桌宠背后弹出来，观感是「桌宠被压了一下」。 */
-                IslandWindow win = new IslandWindow(look, scene, art, state, selftest, log, wdaProbe, noWda, excludeCapture, liveProbe, freezeShot, heartbeat, todoOpen, notify || notifyTest, notifyTest, notifyTrace, petAuto, petProbe);
+                IslandWindow win = new IslandWindow(look, scene, art, state, selftest, log, wdaProbe, noWda, excludeCapture, liveProbe, freezeShot, heartbeat, todoOpen, notify || notifyTest, notifyTest, notifyTrace, petAuto, petOn, petProbe);
                 win.Show();
             };
 

@@ -616,15 +616,13 @@ namespace WinIsland
 
         /* 偏移 → 视线方向：+X 向右、+Y 向上（Pet3D 的 Y 轴朝上，
            作者写的 idle-look-up 用的就是 +0.62），所以纵向取反。
-           除以 BodyR 而不是命中半径：贴到球边就给满偏转。
-           **不限距离** —— 远处算出来是同一个方向（钳到 ±1），
-           这是「拖文件时一路都跟」的实现基础。*/
+           归一化与饱和都走 PetGaze（与岛内那只桌宠同一份实现）：
+           先取方向、再乘 tanh 饱和后的幅值。改动前是 dx/BodyR 逐轴钳到 ±1，
+           斜着拖时两根轴各自先撞顶，37° 会被掰成 45° —— 远处方向是错的。
+           reach 跟着球半径走，所以这里换尺寸也不影响手感。*/
         static void LookDirection(double dx, double dy, out double gx, out double gy)
         {
-            gx = dx / BodyR;
-            gy = -dy / BodyR;
-            if (gx < -1) gx = -1; else if (gx > 1) gx = 1;
-            if (gy < -1) gy = -1; else if (gy > 1) gy = 1;
+            PetGaze.FollowScreen(dx, dy, BodyR, out gx, out gy);
         }
 
         void LookAtPointer(Point p)
@@ -761,7 +759,7 @@ namespace WinIsland
                     if (jump > maxLookJump) maxLookJump = jump;
                     prevGazeX = lookA.Frame.GazeX;
                 }
-                bool dragGazeFollows = Math.Abs(lookA.Frame.GazeX - 0.85) < 0.02
+                bool pointerGazeFollows = Math.Abs(lookA.Frame.GazeX - 0.85) < 0.02
                                     && Math.Abs(lookA.Frame.GazeY + 0.60) < 0.02
                                     && lookA.LookWeight > 0.999;
 
@@ -769,16 +767,52 @@ namespace WinIsland
                 PetAnimationRuntime lookB = new PetAnimationRuntime(17);
                 lookB.LookAt(-0.85, 0.60);
                 for (int i = 0; i < rampSteps; i++) lookB.Advance(PetAnimationRuntime.Step);
-                bool dragGazeDirectional = lookB.Frame.GazeX < -0.80
+                bool pointerGazeDirectional = lookB.Frame.GazeX < -0.80
                                         && lookB.Frame.GazeY > 0.55
                                         && Math.Abs(lookB.Frame.GazeX - lookA.Frame.GazeX) > 1.6;
 
-                /* 3) 普通鼠标移动不触发：从没 LookAt 过的 runtime，权重恒为 0，
-                      且同一时刻的视线与「指针输入不同」无关 —— 让 gazeIgnoresPointer
-                      仍然成立（那条断言测的就是「普通移动鼠标不改变视线」）。*/
+                /* 3) 没被要求跟的时候不动：从没 LookAt 过的 runtime 权重恒为 0。
+                      这是「底稿自己跑」的基线，下面 4) 的恢复要跟它逐位比对。*/
                 PetAnimationRuntime lookNone = new PetAnimationRuntime(17);
                 for (int i = 0; i < rampSteps; i++) lookNone.Advance(PetAnimationRuntime.Step);
-                bool normalMouseNoLook = lookNone.LookWeight == 0.0;
+
+                /* 3b) 保持态（第三层）：身体停在中立帧、随机池停摆，眼睛照样跟。
+                       这一条取代了旧的 normalMouseNoLook —— 需求从「只有拖文件时跟」
+                       改成了「第三层开着就跟」，所以普通鼠标移动现在**就是**要跟的。 */
+                PetAnimationRuntime holdA = new PetAnimationRuntime(17);
+                holdA.Hold(true);
+                holdA.LookAt(0.85, -0.60);
+                for (int i = 0; i < rampSteps; i++) holdA.Advance(PetAnimationRuntime.Step);
+                PetFrame holdFrame = holdA.Frame;
+                bool holdFreezesRandomActions = Math.Abs(holdFrame.SquashX - 1) < 1e-6
+                                             && Math.Abs(holdFrame.SquashY - 1) < 1e-6
+                                             && Math.Abs(holdFrame.Zoom - 1) < 1e-6
+                                             && Math.Abs(holdFrame.Yaw) < 1e-6
+                                             && Math.Abs(holdFrame.Pitch) < 1e-6
+                                             && Math.Abs(holdFrame.Roll) < 1e-6
+                                             && Math.Abs(holdFrame.MorphAmount) < 1e-6
+                                             && holdFrame.State == "hold";
+                bool holdStillFollowsPointer = Math.Abs(holdFrame.GazeX - 0.85) < 0.02
+                                            && Math.Abs(holdFrame.GazeY + 0.60) < 0.02
+                                            && holdA.LookWeight > 0.999;
+
+                /* 3c) 退出保持：随机池必须自己回来（换个片段继续跑），
+                       而且身体真的重新动起来 —— 只判 State 变了不够。 */
+                holdA.LookAway();
+                holdA.Hold(false);
+                bool holdReleaseRestores = false;
+                for (int i = 0; i < rampSteps; i++)
+                {
+                    holdA.Advance(PetAnimationRuntime.Step);
+                    if (holdA.Frame.State != "hold"
+                        && (Math.Abs(holdA.Frame.SquashY - holdFrame.SquashY) > 1e-6
+                            || Math.Abs(holdA.Frame.Yaw - holdFrame.Yaw) > 1e-6
+                            || Math.Abs(holdA.Frame.Lid - holdFrame.Lid) > 1e-6))
+                    {
+                        holdReleaseRestores = true;
+                        break;
+                    }
+                }
 
                 /* 4) 结束后平滑恢复：先看 1s，再松手 1s，必须回到「从没看过」的
                       同种类 runtime 的同一帧；恢复过程每帧不许跳变。*/
@@ -795,16 +829,16 @@ namespace WinIsland
                     if (jump > maxRestoreJump) maxRestoreJump = jump;
                     prevGazeX = lookThenBack.Frame.GazeX;
                 }
-                bool dragGazeRestores = Math.Abs(lookThenBack.Frame.GazeX - lookNone.Frame.GazeX) < 1e-9
+                bool pointerGazeRestores = Math.Abs(lookThenBack.Frame.GazeX - lookNone.Frame.GazeX) < 1e-9
                                      && Math.Abs(lookThenBack.Frame.GazeY - lookNone.Frame.GazeY) < 1e-9
                                      && lookThenBack.LookWeight == 0.0;
 
                 /* 进和出都要是「滑」不是「跳」：单帧位移远小于整段行程 */
-                bool dragGazeSmooth = maxLookJump < 0.08 && maxRestoreJump < 0.08;
+                bool pointerGazeSmooth = maxLookJump < 0.08 && maxRestoreJump < 0.08;
 
-                /* 4b) 跟随不限距离：饱和之后，300 / 600 / 1200 DIP 必须给出同一个偏转，
-                       以前这里有个 220 DIP 的衰减，实测「远一点就不跟了」，
-                       所以判据钉住「远处等价 + 已满偏转」，而不是钉住衰减曲线。*/
+                /* 4b) 跟随不限距离：tanh 饱和之后 300 / 600 / 1200 DIP 必须给出**同一个**
+                       方向与幅值，而且方向不能被逐轴钳制掰弯（0.6 : 0.8 就是 3:4）。
+                       以前这里逐轴钳到 ±1，远处会得到 (1,-1) —— 45° 而不是 37°。 */
                 bool followReachesAtAnyDistance = true;
                 double refGx = 0, refGy = 0;
                 double[] probeDists = new double[] { 300, 600, 1200 };
@@ -816,9 +850,11 @@ namespace WinIsland
                     else if (Math.Abs(gx - refGx) > 1e-9 || Math.Abs(gy - refGy) > 1e-9)
                         followReachesAtAnyDistance = false;
                 }
-                /* 方向必须是右下，且已经饱和 —— 光「三处相等」不够，
-                   全都算成 0 也相等，那就测不出跟不跟。 */
-                if (!(refGx > 0.99 && refGy < -0.99)) followReachesAtAnyDistance = false;
+                /* 光「三处相等」不够，全算成 0 也相等：还要钉住「方向对、幅值满」。 */
+                double refLength = Math.Sqrt(refGx * refGx + refGy * refGy);
+                if (Math.Abs(refLength - PetGaze.MaxAmount) > 1e-9) followReachesAtAnyDistance = false;
+                if (Math.Abs(refGx / refGy - (0.6 / -0.8)) > 1e-9) followReachesAtAnyDistance = false;
+                if (!(refGx > 0.5 && refGy < -0.7)) followReachesAtAnyDistance = false;
 
                 /* 5) 满偏转不过球：±1 的视线喂进去，眼睛中心仍在球面内。
                       防穿模本身在 PetShape.EyePair（0.92 球面归一 + z<0.12 剔除）
@@ -884,9 +920,42 @@ namespace WinIsland
                         if (point.Y > maxEyeY) maxEyeY = point.Y;
                     }
                 }
-                bool eyeProjectedShapeOk = edgeEye != null
-                    && Math.Abs((maxEyeX - minEyeX) - 0.20) < 0.003
-                    && Math.Abs((maxEyeY - minEyeY) - 0.25) < 0.003;
+                /* 边缘窄、正面宽 —— 这条以前断的是**相反**的性质：
+                   旧实现把眼睛当屏幕平面里的矩形，在 x=0.85 处投影出来
+                   仍然是 0.20 宽（等于「不管转到哪都一样宽」的贴纸感）。
+                   现在是切平面贴片，同一个尺寸在正面 0.20、在轮廓处只剩
+                   right.x 那么多（约 0.105）。所以判据改成：
+                   高度基本不变、宽度必须明显变窄、而且是真的球面贴片。 */
+                MeshGeometry3D faceEye = Pet3D.EyeMesh(0.0, 0.04, 0.20, 0.25);
+                double faceW = 0, faceH = 0, edgeW = 0, edgeH = 0;
+                bool faceEyeOnSurface = faceEye != null;
+                if (faceEye != null)
+                {
+                    double minX = double.PositiveInfinity, maxX = double.NegativeInfinity;
+                    double minY = double.PositiveInfinity, maxY = double.NegativeInfinity;
+                    for (int i = 0; i < faceEye.Positions.Count; i++)
+                    {
+                        Point3D point = faceEye.Positions[i];
+                        if (point.X < minX) minX = point.X;
+                        if (point.X > maxX) maxX = point.X;
+                        if (point.Y < minY) minY = point.Y;
+                        if (point.Y > maxY) maxY = point.Y;
+                        double d2 = point.X * point.X + point.Y * point.Y;
+                        double r = Math.Sqrt(d2 + point.Z * point.Z);
+                        if (d2 > 0.97 * 0.97 || Math.Abs(r - 1.015) > 0.0001) faceEyeOnSurface = false;
+                    }
+                    faceW = maxX - minX;
+                    faceH = maxY - minY;
+                }
+
+                edgeW = maxEyeX - minEyeX;
+                edgeH = maxEyeY - minEyeY;
+                bool eyeProjectedShapeOk = edgeEye != null && faceEye != null
+                    && Math.Abs(faceW - 0.20) < 0.003
+                    && Math.Abs(faceH - 0.25) < 0.003
+                    && edgeW > 0.08 && edgeW < 0.13
+                    && edgeH > 0.24 && edgeH < 0.26
+                    && faceEyeOnSurface;
                 bool eyeSurfaceOk = true;
                 if (eyeMesh != null)
                 {
@@ -1110,8 +1179,10 @@ namespace WinIsland
                 bool transparentOk = transparentWindow && transparentBrush;
 
                 bool ok = deterministic && pokeTransition && spinTransition && interactionRecovery && idleClipVariety && gazeRangeVisible && gazeIgnoresPointer && wanderingRangeVisible && idleExpressionVariety && morphBehindBlink && idleShapeReturnsToBall && idleShapeMorphs && turnProjectionChanges && pitchProjectionChanges && spinHidesFace && capsuleEyes && sphereMeshOk && eyeMeshOk && eyeProjectedShapeOk && eyeSurfaceOk && gazeSurfaceOk && expressionChangesEyes && sizeOk && purpleOk && purpleBaseOk && flatBodyColor && eyesOk && transparentOk
-                        && dragGazeFollows && dragGazeDirectional && normalMouseNoLook
-                        && dragGazeRestores && dragGazeSmooth && followReachesAtAnyDistance && extremeLookStaysOnBody
+                        && pointerGazeFollows && pointerGazeDirectional
+                        && pointerGazeRestores && pointerGazeSmooth
+                        && holdFreezesRandomActions && holdStillFollowsPointer && holdReleaseRestores
+                        && followReachesAtAnyDistance && extremeLookStaysOnBody
                         && idlePoolFullyPlayed;
 
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
@@ -1124,13 +1195,15 @@ namespace WinIsland
                 sb.AppendLine("  \"idleClipVariety\": " + (idleClipVariety ? "true" : "false") + ",");
                 sb.AppendLine("  \"gazeRangeVisible\": " + (gazeRangeVisible ? "true" : "false") + ",");
                 sb.AppendLine("  \"gazeIgnoresPointer\": " + (gazeIgnoresPointer ? "true" : "false") + ",");
-                sb.AppendLine("  \"dragGazeFollows\": " + (dragGazeFollows ? "true" : "false") + ",");
-                sb.AppendLine("  \"dragGazeDirectional\": " + (dragGazeDirectional ? "true" : "false") + ",");
-                sb.AppendLine("  \"normalMouseNoLook\": " + (normalMouseNoLook ? "true" : "false") + ",");
-                sb.AppendLine("  \"dragGazeRestores\": " + (dragGazeRestores ? "true" : "false") + ",");
-                sb.AppendLine("  \"dragGazeSmooth\": " + (dragGazeSmooth ? "true" : "false") + ",");
-                sb.AppendLine("  \"dragGazeMaxJump\": " + maxLookJump.ToString("0.0000") + ",");
-                sb.AppendLine("  \"dragGazeMaxRestoreJump\": " + maxRestoreJump.ToString("0.0000") + ",");
+                sb.AppendLine("  \"pointerGazeFollows\": " + (pointerGazeFollows ? "true" : "false") + ",");
+                sb.AppendLine("  \"pointerGazeDirectional\": " + (pointerGazeDirectional ? "true" : "false") + ",");
+                sb.AppendLine("  \"holdFreezesRandomActions\": " + (holdFreezesRandomActions ? "true" : "false") + ",");
+                sb.AppendLine("  \"holdStillFollowsPointer\": " + (holdStillFollowsPointer ? "true" : "false") + ",");
+                sb.AppendLine("  \"holdReleaseRestores\": " + (holdReleaseRestores ? "true" : "false") + ",");
+                sb.AppendLine("  \"pointerGazeRestores\": " + (pointerGazeRestores ? "true" : "false") + ",");
+                sb.AppendLine("  \"pointerGazeSmooth\": " + (pointerGazeSmooth ? "true" : "false") + ",");
+                sb.AppendLine("  \"pointerGazeMaxJump\": " + maxLookJump.ToString("0.0000") + ",");
+                sb.AppendLine("  \"pointerGazeMaxRestoreJump\": " + maxRestoreJump.ToString("0.0000") + ",");
                 sb.AppendLine("  \"followReachesAtAnyDistance\": " + (followReachesAtAnyDistance ? "true" : "false") + ",");
                 sb.AppendLine("  \"extremeLookStaysOnBody\": " + (extremeLookStaysOnBody ? "true" : "false") + ",");
                 sb.AppendLine("  \"wanderingRangeVisible\": " + (wanderingRangeVisible ? "true" : "false") + ",");
@@ -1146,8 +1219,11 @@ namespace WinIsland
                 sb.AppendLine("  \"sphereMesh\": " + (sphereMeshOk ? "true" : "false") + ",");
                 sb.AppendLine("  \"eyeMesh\": " + (eyeMeshOk ? "true" : "false") + ",");
                 sb.AppendLine("  \"eyeProjectedShape\": " + (eyeProjectedShapeOk ? "true" : "false") + ",");
-                sb.AppendLine("  \"eyeProjectedWidth\": " + (maxEyeX - minEyeX).ToString("0.0000") + ",");
-                sb.AppendLine("  \"eyeProjectedHeight\": " + (maxEyeY - minEyeY).ToString("0.0000") + ",");
+                sb.AppendLine("  \"eyeProjectedWidth\": " + edgeW.ToString("0.0000") + ",");
+                sb.AppendLine("  \"eyeProjectedHeight\": " + edgeH.ToString("0.0000") + ",");
+                sb.AppendLine("  \"eyeFrontWidth\": " + faceW.ToString("0.0000") + ",");
+                sb.AppendLine("  \"eyeFrontHeight\": " + faceH.ToString("0.0000") + ",");
+                sb.AppendLine("  \"eyeForeShortening\": " + (faceW > 0 ? (edgeW / faceW).ToString("0.0000") : "0") + ",");
                 sb.AppendLine("  \"eyeSurface\": " + (eyeSurfaceOk ? "true" : "false") + ",");
                 sb.AppendLine("  \"gazeSurface\": " + (gazeSurfaceOk ? "true" : "false") + ",");
                 sb.AppendLine("  \"pitchProjectionChanges\": " + (pitchProjectionChanges ? "true" : "false") + ",");

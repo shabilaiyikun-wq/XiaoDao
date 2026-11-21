@@ -464,3 +464,129 @@ double wl = ClampD(ClampD(_anchorX - def.ExpW/2, vl, vr - def.ExpW) - lead, vl, 
 模糊）要 80~300ms，实测一拍就差 0.35s，连 0.44s 的行程都解析不出来。
 所以改成记录动画自己的输出（`_petTrace`：时间线/直径/球心/不透明度/槽位），
 一次行程就有二十多帧真值；像素只用来确认「画面上确实只有一个球」。
+
+## 11. 第四阶段：文件拖拽注视（已完成）
+
+### 11.1 参考实现与许可
+
+跟随算法移植自 Bencho 的 Eye tracker（MIT）：
+
+- 上游：`https://github.com/cabralorenzo/bencho` → `blocks/eye-tracker/Watcher.tsx`
+- 许可：MIT，`Copyright (c) 2026 Lorenzo Cabra`
+- 完整许可文本与出处写在 `pet-demo/PetGaze.cs` 文件头尾，随源码一起走
+
+**移植了什么**：方向归一化、`tanh` 距离饱和、双轴弹簧跟随、双眼共用一组
+yaw/pitch 在球面上转。
+
+**没移植什么**：参考实现里那套 SVG 上的「simulate foreshortening」缩放。
+这边是真 3D——眼睛是球面补丁，透视缩窄和互相遮挡由几何和 z-buffer 负责。
+两套一起用会重复变形，所以只保留真实几何那一路。
+
+### 11.2 数学（`pet-demo/PetGaze.cs`）
+
+```
+far  = min(cap, tanh(d / reach) * (follow/100) * 1.5)
+reach= max(60, min(w,h) * 0.28)          % 参考实现里是像素；这里换算成球半径倍数
+k    = 0.06                              % 弹簧刚度（参考实现）
+d    = 0.34                              % 阻尼系数（参考实现）
+yaw  = asin(clamp(t.x, -0.92, 0.92))
+pitch= -asin(clamp(t.y, -0.92, 0.92))
+```
+
+参考实现的 `k/d` 是 60Hz 尺度下的经验值，这里的动画是固定 120Hz
+（`PetAnimationRuntime.Step = 1/120`），所以换算成：
+
+```
+ω = sqrt(0.06) * 60 = 14.697 rad/s
+ζ = 0.34 / (2 * sqrt(0.06)) = 0.694
+```
+
+`reach` 用「球半径倍数」而不是绝对像素：岛内 16.8dip 的球和岛旁 33.6dip 的球
+在同样的**相对**距离上有同样的偏转，这样换层、长两倍都不用改参数。
+
+### 11.3 眼几何（`pet-demo/Pet3D.cs`）
+
+眼睛不再「平移两个圆心」，而是：
+
+1. 静止点在半径 `EyeSurfaceRadius = 1.015` 的球上
+2. 按 `yaw/pitch` 旋转该点得到锚点
+3. 在锚点处取切平面基（`right = cross(worldUp, n)`、`up = cross(n, right)`）
+4. 补丁的每个顶点投影回球面并重新归一化到 `1.015`
+
+于是靠近轮廓的眼睛自然被压窄（实测 **53.4%**），高度不变，且始终贴着球面。
+`EyeFrame` 用世界朝上而不是旋转后的静止基，与「贴花」相比有约 2° 滚转差，
+换来的是一条几何通路——这个取舍写在文件里。
+
+`FitGaze` 用 24 步二分把注视量压到「双眼都还在 `MaxEyeRadius = 0.97` 圆盘内、
+且 `z >= EyeFrontZ = 0.12`」的范围，所以极端角度不会穿到轮廓外。
+
+### 11.4 岛侧接线（`desktop/PetIsland.cs`）
+
+触发条件是**层状态**，不是拖放事件：
+
+- `PetLookTick()` 每帧跑（`AdvancePet` 里排在 `PlacePet()` 之后），
+  `want = _state == "expanded"` —— 第三层（岛完全展开，球在岛旁、直径 33.6）
+  开着就一直跟；第一层（`idle`，球停在岛内 16.8）和第二层（`compact`）不跟
+- 进层：`_petStage.Hold(true)`；退层：`Hold(false)` + `LookAway()`。
+  随机张望和随机片段自己回来，不需要另外的定时器
+- 坐标：`GetCursorPos` 给物理像素，`screen.X / _dpi - Left` 换成根坐标 DIP ——
+  和 `OnHitTick` 算 `localX/localY` 是同一条换算，所以「点在哪儿」和
+  「画在哪儿」不会各说一套。球心/球径由 `PlacePet` 每帧写进
+  `_petCx/_petCy/_petDia`，并岛换层、长两倍、DPI 缩放全部自动跟上
+- 半径取 `_petDia / 2`，`reach` 随球一起缩放
+- 日志按偏移量限流（变化 >2 才记一行），第三层一开着就是每秒 60 次调用
+
+**为什么不用 `DragEnter` / `DragOver` 驱动**：那是**事件**，频率跟鼠标一样抖，
+而且鼠标不动时就停在最后一次事件的坐标上。「第三层开着就一直盯着鼠标」是
+**状态** —— 用状态驱动，鼠标停住时眼睛也停在同一方向，且不要求用户按住左键。
+
+> 追加需求（本次）：这条**取代**了早先「只在 OLE 确认过 `DataFormats.FileDrop`
+> 时才跟」的约束。第三层里普通鼠标移动、以及拖文本，都会带动眼睛；拖文件时
+> 岛会自动进第三层（`OnDragEnterFiles` 里 `SetState("expanded")`），所以原来
+> 「拖文件跟眼睛」的行为仍然在，只是触发条件换成了层。
+
+### 11.5 保持态：第三层期间不做随机动作（`pet-demo/PetAnim.cs`）
+
+`PetAnim` 加了一个 `hold` 位，落地方式是「把底稿换成静止中立帧 + 停掉片段调度」：
+
+- `HoldPose`：`SquashX=SquashY=Zoom=1`、`Yaw/Pitch/Roll/Offset=0`、
+  `MorphAmount=0`、`Expression=Neutral`、`State="hold"`
+- `BaseFrame()`：`hold ? HoldPose : clip.Sample(clipTime)`
+- `Tick()`：`else if(!hold)` 才推 `clipTime` 和 `NextClip()` —— 随机池真正停摆，
+  不是「抽到也不显示」
+- 进出都从当前画面接（`bridgeFrom = current, bridgeTime = 0`，走同一条 `Blend`），
+  所以换姿态是滑的；退出时顺手 `NextClip()`，接上新的随机片段
+- `Hold()` 幂等，重复调用不会重起桥接
+
+**为什么不用「冻结当前片段进度」**：片段可能正好停在 squash 或翻滚的中段，
+冻在那儿看起来是坏了，不是站着。中立帧是明确姿态，读起来是刻意的。
+
+### 11.6 验收
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| 第三层跟鼠标 | 通过 | 真机日志：`state compact -> expanded` → `pet look on (layer3 hold)` |
+| 退出第三层恢复默认 | 通过 | `state expanded -> compact` → `pet look off, random pool resumes`，此后零条 `pet look aim` |
+| 方向正确 | 通过 | 光标在球心右上 → `0.884,0.467`；右下 → `0.996,-0.088`；**左侧** → `-0.185,0.983` |
+| 保持期间无随机动作 | 通过 | 连拍 5 帧球 bbox 恒为 `46,55-94,104`，面积 1817–1832（±0.8%） |
+| 对照：不保持时在动 | 通过 | 同一台机、同一尺寸：bbox `308,27-357,75`→`313,28-361,76`，面积 1766–1828（±3.5%） |
+| 保持期间眼睛仍在动 | 通过 | 同 5 帧眼质心 norm x `0.24→0.10→0.56→0.52`，y `-0.46→0.51→0.03` |
+| 快速跨越平滑 | 通过 | 弹簧单帧 ≤5.8%（限值 7%），过冲 <8%，横穿 26 帧 |
+| 坐标跨层/DPI 正确 | 通过 | 物理光标 (1517,744) → 根 (424,419)，日志 `aim 431.9,**419.0**`（y 逐位吻合，x 差 7.9 = 采样时刻差） |
+| 极限角度不穿模 | 通过 | 10 个表情 × 4 个对角，顶点全在 0.97 圆盘内且 `z >= 0.12` |
+| 保持态可复用 | 通过 | `hold parks the body…` / `…stops the random clip pool` / `…still lets the eyes follow` / `leaving hold resumes…` / `…bridges back`（单帧 0.0029）/ `holding twice is idempotent` |
+
+**没有验证到的**（如实记录）：
+
+1. 这台机上有个**残留探针进程**（`IslandDragProbe` pid 9032，早先 `cancel`
+   模式的崩溃实例，`taskkill` 报 Access denied）仍在偶尔注入鼠标移动，
+   所以「我设的光标点」有时会被它挪走。上面的注视数值全部来自岛**自己**读到的
+   光标，成对校验过（物理 → 根坐标换算与 `hover` 日志逐位一致），不受影响；
+   但「精确停在某个点」的实验做不干净。
+2. 第一层（`idle`，球停在岛内 16.8）时的跟手没有单独取像素证据 —— 门控是
+   `_state == "expanded"`，`idle` 明确不跟，只由代码路径保证，没有实拍对照。
+3. 早先那轮合成拖拽在两种构建上都没走到 `Drop`（`DROP items=0`、
+   `transfer.txt` 不变），「文件真的被收下」仍靠**未改动**的既有路径，
+   本次没有再测（触发源已从拖放换成层状态，这一项与本功能无关）。
+4. 岛在「拖出窗口后松手」时 `_dragIn` 会卡住（`drag leave = 0`，岛不回 idle）。
+   既有问题，改它等于改文件接收状态机，本次不动。

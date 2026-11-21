@@ -83,6 +83,22 @@ namespace WinIsland
         /* 探针模式：钉住层状态，不让悬停/数据轮询改层，量出来的东西才可复现 */
         bool _petProbeLock;
 
+        /* ---------------------------------------------------- 第三层跟鼠标
+
+           坐标全部是**根坐标的 DIP**：光标的物理像素先除 _dpi，再减窗口 Left/Top
+           （和 OnHitTick 算 localX/localY 同一条换算）；球心与直径由 PlacePet 每帧
+           写进来 —— 于是停靠、展开、长到两倍、换 DPI、换槽位全部自动跟上，
+           这边不需要再算一次坐标，也就没有「界面和命中用两套坐标系」那类错位。
+
+           驱动条件是**状态**不是事件：岛在 expanded 态就一直跟，鼠标不动时眼睛
+           也停在那个方向（事件驱动会停在最后一次事件的坐标上）。 */
+        double _petCx, _petCy, _petDia;
+        bool _petLookOn;          /* 正在跟鼠标（= 第三层开着） */
+        bool _petLookValid;       /* 有一个有效的光标位置 */
+        double _petLookX, _petLookY;
+        double _petLookLogged;    /* 上一次记日志时的偏移量（限流用） */
+        double _petGazeX, _petGazeY;  /* 最近一次算出的注视量（诊断用） */
+
         /* 过渡逐帧轨迹。软件渲染一张全尺寸窗口（_refract 上还挂着模糊）
            要 80~300ms，靠抓像素根本解析不了 0.44s 的行程 —— 实测一拍就差 0.27s。
            所以平滑度改成**记录动画自己的输出**：每帧 60 次推进时把
@@ -171,6 +187,96 @@ namespace WinIsland
 
             _petStage.Advance(dt);
             PlacePet();
+            /* 排在 PlacePet 之后：球心和直径刚更新过，用的是这一帧的真值。 */
+            PetLookTick();
+        }
+
+        /* ---------------------------------------------------- 第三层：跟鼠标
+
+           触发条件从「文件正在被拖」改成「第三层（岛展开）开着」：
+
+             - 岛在 expanded 态时每个帧从 GetCursorPos 读一次光标，喂给同一套
+               PetGaze + 弹簧，所以方向跟手、快慢由弹簧负责；
+             - 同时 _petStage.Hold(true)：底稿换成静止中立帧、随机池停摆，
+               这段时间里唯一的动作就是眼睛；
+             - 退出第三层（回到 idle / compact）就 Hold(false) + LookAway()，
+               随机张望和随机片段自己回来 —— 不需要另外的定时器。
+
+           为什么不用 DragEnter/DragOver 驱动：那是**事件**，频率跟鼠标一样抖，
+           而「打开第三层就一直盯着鼠标」是**状态**。用状态驱动意味着鼠标不动时
+           眼睛也一直盯着（事件驱动会停在最后一次事件的坐标上），而且不要求用户
+           按住左键 —— 只是把光标移到想看的位置。
+
+           坐标：GetCursorPos 给物理像素，先除 _dpi 换成 DIP，再减窗口的 Left/Top
+           得到根坐标 —— 和 OnHitTick 里算 localX/localY 用的是同一条换算，
+           所以「点在哪儿」和「画在哪儿」不会各说一套。 */
+        void PetLookTick()
+        {
+            if (_petStage == null || !_petOn) return;
+
+            /* 只有第三层跟。expanded 是岛完全展开那一层，球在岛旁、直径 33.6dip。 */
+            bool want = _state == "expanded";
+
+            if (want != _petLookOn)
+            {
+                _petLookOn = want;
+                if (want)
+                {
+                    _petStage.Hold(true);
+                    Trace("pet look on (layer3 hold)");
+                }
+                else
+                {
+                    _petStage.Hold(false);
+                    _petStage.LookAway();
+                    _petLookValid = false;
+                    Trace("pet look off, random pool resumes");
+                }
+            }
+            if (!want) return;
+
+            Point screen;
+            if (!Native.TryGetCursor(out screen)) return;
+
+            double x = screen.X / _dpi - Left;
+            double y = screen.Y / _dpi - Top;
+            _petLookX = x;
+            _petLookY = y;
+            _petLookValid = true;
+            ApplyPetLook();
+        }
+
+        /// <summary>
+        /// 把「光标相对球心的偏移」变成注视量。半径取球当前直径的一半，
+        /// 所以 reach 也跟着球一起缩放：岛内 16.8 DIP 的球和岛旁 33.6 DIP 的球
+        /// 在同样的相对距离上有同样的偏转（PetGaze.Follow 的 tanh 分母是半径倍数）。
+        ///
+        /// 日志只在明显移动时记一行 —— 第三层一开着就是每秒 60 行，会把有用信息冲掉。
+        /// 这一行同时是「坐标对不对」的证据：光标、球心、直径全在根坐标 DIP 里。
+        /// </summary>
+        void ApplyPetLook()
+        {
+            if (!_petLookOn || !_petLookValid) return;
+
+            double radius = _petDia * 0.5;
+            if (radius < 1.0) radius = 1.0;
+
+            double gx, gy;
+            PetGaze.FollowScreen(_petLookX - _petCx, _petLookY - _petCy, radius,
+                                 out gx, out gy);
+            _petGazeX = gx;
+            _petGazeY = gy;
+            _petStage.LookAt(gx, gy);
+
+            double moved = Math.Abs(_petLookX - _petCx) + Math.Abs(_petLookY - _petCy);
+            if (Math.Abs(moved - _petLookLogged) > 2.0)
+            {
+                _petLookLogged = moved;
+                Trace("pet look aim " + _petLookX.ToString("0.0") + "," + _petLookY.ToString("0.0")
+                      + " pet " + _petCx.ToString("0.0") + "," + _petCy.ToString("0.0")
+                      + " d " + _petDia.ToString("0.0")
+                      + " -> " + gx.ToString("0.000") + "," + gy.ToString("0.000"));
+            }
         }
 
         /// <summary>把过渡目标设成 target（0 = 岛内，PetLinkTotal = 岛旁）。</summary>
@@ -309,6 +415,12 @@ namespace WinIsland
             Canvas.SetTop(shell, localCy - half);
             shell.Opacity = opacity;
 
+            /* 球心（根坐标 DIP）与球径：文件拖拽的注视就按这两个数算偏移，
+               改层、长两倍、换 DPI 都自动跟着走。 */
+            _petCx = cx;
+            _petCy = cy;
+            _petDia = dia;
+
             _petDock.Width = w;
             _petDock.Height = h;
             _petUnder.Width = Math.Max(2, Width);
@@ -438,6 +550,11 @@ namespace WinIsland
         {
             bool was = _petOn;
             _petOn = false;
+            /* 关掉桌宠等于「没有眼睛可以看」，跟鼠标的状态一并收回 ——
+               留着的话下次 EnablePet 会拿上一轮的光标方向先摆一下。 */
+            _petLookOn = false;
+            _petLookValid = false;
+            _petLookLogged = 0;
             PetLinkTo(0, true);
             UnmountPet();
             PlacePet();
@@ -547,6 +664,16 @@ namespace WinIsland
             _petTween = false;
             _petT = 0;
             _petLastT = -1;
+            /* 注视也必须一起清：否则下一次 EnablePet 建出来的新 stage
+               会立刻被上一轮遗留的目标拽过去（而那个目标早已没有意义）。 */
+            _petLookOn = false;
+            _petLookValid = false;
+            _petLookLogged = 0;
+            _petGazeX = 0;
+            _petGazeY = 0;
+            _petCx = 0;
+            _petCy = 0;
+            _petDia = 0;
             UnmountPet();
             _petStage = null;
         }

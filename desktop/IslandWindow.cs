@@ -154,7 +154,10 @@ namespace WinIsland
            后者管菜单勾选和退出释放。桌宠本体在 PetController 里，这里只持有一份镜像，
            每次动作后跟 PetController.IsOn 对齐，避免两边各记一套状态。 */
         bool _petAuto;
+        /* 本次启动强制要桌宠（--pet-on）。和偏好是两回事：
+           偏好写不写由用户动手才决定，验收脚本不许改它。 */
         bool _petOn;
+        bool _petForce;
         /* --pet-probe：岛内集成版的取证跑法。不靠抓屏猜，直接把可视树渲成位图，
            按 DIP 量球径、眼睛、遮挡；跑完写 JSON + PNG + ASCII 并退出。 */
         bool _petProbe;
@@ -219,7 +222,7 @@ namespace WinIsland
                             bool excludeCapture,
                             bool liveProbe, int freezeShot, bool heartbeat, bool todoOpen,
                             bool notify, bool notifyTest, bool notifyTrace,
-                            bool petAuto, bool petProbe)
+                            bool petAuto, bool petOn, bool petProbe)
         {
             _heartbeat = heartbeat;
             _notify = notify;
@@ -230,6 +233,7 @@ namespace WinIsland
             _liveProbe = liveProbe;
             _freezeShot = freezeShot;
             _petAuto = petAuto;
+            _petForce = petOn;
             _petProbe = petProbe;
             _petOn = PetController.IsOn;
             _lookKey = look;
@@ -713,8 +717,12 @@ namespace WinIsland
                放在 OnLoaded 之后半拍、用 Background 优先级：岛自己的 Rebuild/Apply/
                弹簧入场都在 Normal 优先级上，桌宠建窗（要走 3D 场景初始化）挤在一起
                会让第一帧明显迟滞。它也不写 ui.txt —— 这里只是「按偏好执行」，
-               不是「改偏好」。 */
-            if (_petAuto && Prefs.Pet && !PetController.IsOn)
+               不是「改偏好」。
+
+               _petOn（--pet-on）是给验收用的一次性开关：用户把 pet=0 关掉之后
+               脚本仍然要能跑真实拖拽，又不能为了跑一次测试去改人家的 ui.txt。
+               它只影响这一次启动，走的还是同一条「照意愿执行、不写偏好」的路。 */
+            if (_petAuto && (Prefs.Pet || _petForce) && !PetController.IsOn)
             {
                 Dispatcher.BeginInvoke(new Action(EnablePetByPreference), DispatcherPriority.Background);
             }
@@ -1183,6 +1191,9 @@ namespace WinIsland
             bool files = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
             e.Effects = files ? DragDropEffects.Copy : DragDropEffects.None;
             e.Handled = true;
+
+            /* 这里不再管注视：第三层一开着，PetIsland.PetLookTick 每帧自己读光标，
+               事件到不到都跟得上（而且鼠标停住时也一直盯着）。 */
         }
 
         void OnDragLeaveFiles(object sender, DragEventArgs e)
@@ -1219,6 +1230,8 @@ namespace WinIsland
             _dragIn = false;
             _armOn = false;
             Transfer.Hover = false;
+            /* 注视不在这里收：它跟的是「第三层开着没有」，不是「有没有文件在拖」。
+               拖完岛还展开着，眼睛就该继续跟鼠标；岛收起来 PetLookTick 自己收尾。 */
             if (_state == "expanded" && !_hover) Reconcile();
             Rebuild(false);
             Apply();

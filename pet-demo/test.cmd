@@ -10,7 +10,7 @@ pushd "%~dp0"
   /r:"%FW%\System.Web.Extensions.dll" ^
   /r:"%FW%\System.Core.dll" /r:"%FW%\System.dll" ^
   /resource:grok-clips.json,WinIsland.grok-clips.json ^
-  AnimationCore.cs PetClips.cs ReferenceClips.cs PetShape.cs PetAnim.cs Pet3D.cs AnimationTests.cs
+  AnimationCore.cs PetGaze.cs PetClips.cs ReferenceClips.cs PetShape.cs PetAnim.cs Pet3D.cs AnimationTests.cs
 if errorlevel 1 (popd & exit /b 1)
 AnimationTests.exe
 set "RC=%ERRORLEVEL%"

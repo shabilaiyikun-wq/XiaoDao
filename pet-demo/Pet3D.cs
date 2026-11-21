@@ -8,15 +8,36 @@ namespace WinIsland
 {
     static class Pet3D
     {
+        /* 眼睛的几何约定（沿用原实现的三个量，一个都没改）：
+
+             MaxEyeRadius    眼睛（含边界）在正面圆盘内的上限 —— 防穿模的那道闸
+             EyeSurfaceRadius 眼睛贴片所在球面半径（比身体 1.0 多一点点，压在表面上）
+             EyeFrontZ       正面剔除线，与 PetShape.EyePair 的 z<0.12 同一门槛 */
+
         const double MaxEyeRadius = 0.97;
         const double EyeSurfaceRadius = 1.015;
+        const double EyeFrontZ = 0.12;
+
+        /* 脸的静止位置：两眼在 x = ±0.29，整体上移 0.04（原实现同值）。 */
+        const double EyeRestX = 0.29;
+        const double EyeRestY = 0.04;
+
+        /* 注视量 → 球面点。0.62 是原实现的幅度，保持不变 —— 也就是说
+           片段里 authored 的 Gaze 轨道（-0.76..0.76）折算出来的球面位移
+           与改动前是同一个量级，变的只是「怎么读出来」（球面转向，
+           不是两只眼睛一起平移）。纵向再乘 0.8：脸的上下留白比左右少。 */
+        const double GazeAmount = 0.62;
+        const double GazeUpAmount = 0.8;
+
         static readonly MeshGeometry3D UnitSphere = SphereMesh(40, 28);
 
+        /// <summary>
+        /// 注视量（-1..1）→ 球面点（-0.62..0.62）。下游一律用
+        /// PetGaze.Turn 把这个点读成 yaw / pitch。
+        /// </summary>
         public static double GazeShift(double value)
         {
-            if (value < -1.0) value = -1.0;
-            if (value > 1.0) value = 1.0;
-            return value * 0.62;
+            return PetGaze.Clamp(value, -1.0, 1.0) * GazeAmount;
         }
 
         public static MeshGeometry3D SphereMesh(int longitudeSegments, int latitudeSegments)
@@ -57,23 +78,134 @@ namespace WinIsland
             return mesh;
         }
 
+        /* ============================================================ 眼睛
+
+           改动前后最本质的一处差别：眼睛不再是「两个矩形在屏幕平面里平移」，
+           而是「画在球面上的一张贴片，球转多少它跟着转多少」。
+
+           为什么「平移」读起来是贴纸：
+
+             · 平移两个等大的矩形，两个矩形永远一样宽、永远一样深
+               —— 眼睛离你远近从来没变过，只是位置变了；
+             · 真实球面上，往右看时右眼转到侧壁、左眼几乎还在正面：
+               近轮廓那只在正交投影下会被压窄、同时被球体自己挡掉一部分；
+             · 所以关键不是「往哪移到」，而是「贴片的朝向」。
+
+           实现：锚点 = 两只眼睛各自的球面点绕 yaw / pitch 转过去；
+           贴片 = 以锚点法线为 z 的切平面上那块圆角矩形，再每个顶点
+           投回 1.015 球面（保持「贴片始终压在球面上」这条不变量）。
+           于是压窄与遮挡全部由 WPF 的正交投影 + z-buffer 完成 ——
+           上游 SVG 里那套 `k` / `sx` 模拟缩放一概不叠（叠加就是同一件事
+           做两遍，边缘会窄过头，而且眨眼时会出现缝）。
+
+           两只眼睛共用同一组 yaw / pitch（PetGaze.Turn 从同一注视量算出来），
+           所以它们不可能各指一个方向。 */
+
         public static MeshGeometry3D EyeMesh(double centerX, double centerY,
                                               double width, double height)
         {
             return EyeMesh(centerX, centerY, width, height, 0.0);
         }
 
+        /// <summary>
+        /// 眼睛贴片。centerX / centerY 是眼睛中心在**正面**上的位置（球面点的
+        /// x / y，z 由球面推出），width / height / tilt 是贴片自己的尺寸与倾角。
+        ///
+        /// 注意投影宽度已经包含压窄：x = 0.85 处 right 向量的 x 分量只剩
+        /// 约 0.53，同样的 0.20 宽在那里只投影出 0.105。这是几何的结果，
+        /// 不是又乘了一次缩放系数。
+        /// </summary>
         static MeshGeometry3D EyeMesh(double centerX, double centerY,
                                       double width, double height, double tilt)
         {
+            return EyePatch(AnchorOf(centerX, centerY), width, height, tilt, 0.0);
+        }
+
+        /// <summary>正面 (x, y) → 单位球面上的点（z 取正，正面）。</summary>
+        static Point3D AnchorOf(double faceX, double faceY)
+        {
+            double limit = MaxEyeRadius * MaxEyeRadius;
+            double d2 = faceX * faceX + faceY * faceY;
+            if (d2 > limit)
+            {
+                double k = MaxEyeRadius / Math.Sqrt(d2);
+                faceX *= k; faceY *= k; d2 = limit;
+            }
+            return new Point3D(faceX, faceY, Math.Sqrt(Math.Max(0.0, 1.0 - d2)));
+        }
+
+        /// <summary>
+        /// 一只眼睛的锚点：静止位置绕 yaw（y 轴）与 pitch（x 轴）转过去。
+        /// 旋转保长，所以结果仍在单位球面上 —— 这就是「眼睛附着在球面上」。
+        /// </summary>
+        static Point3D EyeAnchor(int side, double yaw, double pitch)
+        {
+            double x0 = side * EyeRestX;
+            double y0 = EyeRestY;
+            double z0 = Math.Sqrt(Math.Max(1e-6, 1.0 - x0 * x0 - y0 * y0));
+            double x, y, z;
+            PetGaze.RotatePoint(x0, y0, z0, yaw, pitch, out x, out y, out z);
+            double length = Math.Sqrt(x * x + y * y + z * z);
+            if (length < 1e-9) return new Point3D(0, 0, 1);
+            return new Point3D(x / length, y / length, z / length);
+        }
+
+        /// <summary>
+        /// 锚点处的切平面基。right 与屏幕上「右」对齐（叉乘世界 up），
+        /// up 再由 right × n 定出 —— 两只眼睛因此永远不自转、也不会互相扭转。
+        ///
+        /// 上游给整对眼睛额外加了一个 `tilt = TILT * t.x * t.y` 的斜靠。
+        /// 这里不加：项目里的倾角已经由表情（PetFaces.Eye 的 Tilt）占着，
+        /// 再叠一个就会把「生气时眼角上挑」这类语义糊掉。
+        /// </summary>
+        static void EyeFrame(Point3D unitAnchor, out Vector3D right, out Vector3D up)
+        {
+            Vector3D n = new Vector3D(unitAnchor.X, unitAnchor.Y, unitAnchor.Z);
+            n.Normalize();
+
+            right = Vector3D.CrossProduct(new Vector3D(0, 1, 0), n);
+            if (right.LengthSquared < 1e-9) right = new Vector3D(1, 0, 0);
+            right.Normalize();
+
+            up = Vector3D.CrossProduct(n, right);
+            up.Normalize();
+        }
+
+        /// <summary>
+        /// 切平面局部坐标 → 球面上的点。最后除一次长度，把顶点压回
+        /// EyeSurfaceRadius 球面：这条不变量是「贴片不会从球面里浮出来、
+        /// 也不会陷进去」的保证（改动前每个顶点半径恒为 1.015，现在也一样）。
+        /// </summary>
+        static Point3D SurfacePoint(Point3D unitAnchor, Vector3D right, Vector3D up,
+                                    double localX, double localY)
+        {
+            double ax = unitAnchor.X * EyeSurfaceRadius + right.X * localX + up.X * localY;
+            double ay = unitAnchor.Y * EyeSurfaceRadius + right.Y * localX + up.Y * localY;
+            double az = unitAnchor.Z * EyeSurfaceRadius + right.Z * localX + up.Z * localY;
+            double length = Math.Sqrt(ax * ax + ay * ay + az * az);
+            if (length < 1e-9) return new Point3D(0, 0, EyeSurfaceRadius);
+            double k = EyeSurfaceRadius / length;
+            return new Point3D(ax * k, ay * k, az * k);
+        }
+
+        static MeshGeometry3D EyePatch(Point3D unitAnchor, double width, double height,
+                                        double tilt, double offsetY)
+        {
+            Vector3D right, up;
+            EyeFrame(unitAnchor, out right, out up);
+
             MeshGeometry3D mesh = new MeshGeometry3D();
-            List<Point> boundary = EyeBoundary(centerX, centerY, width, height, tilt);
-            Point center = new Point(centerX, centerY);
+            List<Point> boundary = EyeBoundary(0, 0, width, height, tilt);
+            /* OffsetY 是表情自带的纵向微移（Curious 两眼不对称那种）。
+               它作用在贴片的局部 up 方向 —— 也就是「眼睛在球面上挪一点」，
+               而不是「整块贴片飘离球面」。 */
+            Point center = new Point(0, offsetY);
             const int radialSubdivisions = 6;
             for (int i = 0; i < boundary.Count; i++)
             {
-                Point edgeA = boundary[i];
-                Point edgeB = boundary[(i + 1) % boundary.Count];
+                Point edgeA = new Point(boundary[i].X, boundary[i].Y + offsetY);
+                Point edgeB = new Point(boundary[(i + 1) % boundary.Count].X,
+                                        boundary[(i + 1) % boundary.Count].Y + offsetY);
                 for (int step = 0; step < radialSubdivisions; step++)
                 {
                     double r0 = (double)step / radialSubdivisions;
@@ -82,8 +214,8 @@ namespace WinIsland
                     Point innerB = Lerp(center, edgeB, r0);
                     Point outerA = Lerp(center, edgeA, r1);
                     Point outerB = Lerp(center, edgeB, r1);
-                    AddTriangle(mesh, innerA, outerA, outerB);
-                    AddTriangle(mesh, innerA, outerB, innerB);
+                    AddTriangle(mesh, unitAnchor, right, up, innerA, outerA, outerB);
+                    AddTriangle(mesh, unitAnchor, right, up, innerA, outerB, innerB);
                 }
             }
             mesh.Freeze();
@@ -132,39 +264,48 @@ namespace WinIsland
             return boundary;
         }
 
-        static double FitEyeGaze(double gazeX, double gazeY, double width,
-                                 double height, double tilt, PetExpression expression)
+        /* 防穿模。改动前是「把转幅整体乘一个系数，直到两只眼睛的边界都落在
+           正面圆盘里」；现在边界的位置也跟着球面转向走了，所以判据改成
+           逐点检查贴片顶点本身：投影半径 ≤ MaxEyeRadius 且 z ≥ EyeFrontZ。
+
+           为什么还要二分：球面转向是 asin 的，不是线性的；但「转幅 × 系数」
+           仍然单调 —— 系数越小越靠近脸的正中，最安全。二分 24 次取可行解的
+           下界，效果是「眼睛能转到哪就转到哪，剩下的转幅被摊掉」。 */
+
+        static double FitGaze(double gazeX, double gazeY, PetEyePose left, PetEyePose right)
         {
-            if (EyePairFits(gazeX, gazeY, width, height, tilt, expression)) return 1.0;
+            if (EyePairFits(gazeX, gazeY, left, right)) return 1.0;
             double low = 0.0, high = 1.0;
             for (int i = 0; i < 24; i++)
             {
                 double mid = (low + high) * 0.5;
-                if (EyePairFits(gazeX * mid, gazeY * mid, width, height, tilt, expression))
-                    low = mid;
-                else
-                    high = mid;
+                if (EyePairFits(gazeX * mid, gazeY * mid, left, right)) low = mid;
+                else high = mid;
             }
             return low;
         }
 
-        static bool EyePairFits(double gazeX, double gazeY, double width,
-                                double height, double tilt, PetExpression expression)
+        static bool EyePairFits(double gazeX, double gazeY, PetEyePose left, PetEyePose right)
         {
-            double limitSquared = MaxEyeRadius * MaxEyeRadius;
+            double yaw, pitch;
+            PetGaze.Turn(gazeX, gazeY, out yaw, out pitch);
             for (int side = -1; side <= 1; side += 2)
             {
-                double sideHeight = height;
-                if (expression == PetExpression.Wink && side > 0) sideHeight *= 0.06;
-                double centerX = side * 0.29 + gazeX;
-                double centerY = 0.04 + gazeY;
-                if (centerX * centerX + centerY * centerY > limitSquared) return false;
-                List<Point> boundary = EyeBoundary(centerX, centerY, width, sideHeight,
-                                                   side < 0 ? -tilt : tilt);
+                PetEyePose pose = side < 0 ? left : right;
+                Point3D anchor = EyeAnchor(side, yaw, pitch);
+                if (anchor.Z < EyeFrontZ) return false;
+
+                Vector3D rightAxis, upAxis;
+                EyeFrame(anchor, out rightAxis, out upAxis);
+                List<Point> boundary = EyeBoundary(0, 0, pose.Width, pose.Height, pose.Tilt);
+                double limit = MaxEyeRadius * MaxEyeRadius;
                 for (int i = 0; i < boundary.Count; i++)
                 {
-                    Point point = boundary[i];
-                    if (point.X * point.X + point.Y * point.Y > limitSquared) return false;
+                    Point3D point = SurfacePoint(anchor, rightAxis, upAxis,
+                                                 boundary[i].X,
+                                                 boundary[i].Y + pose.OffsetY);
+                    if (point.Z < EyeFrontZ) return false;
+                    if (point.X * point.X + point.Y * point.Y > limit) return false;
                 }
             }
             return true;
@@ -182,23 +323,23 @@ namespace WinIsland
 
             Material eyes = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(0xF4, 0xF3, 0xFF)));
             double gazeX = GazeShift(frame.GazeX);
-            double gazeY = GazeShift(frame.GazeY) * 0.8;
+            double gazeY = GazeShift(frame.GazeY) * GazeUpAmount;
             PetEyePose leftPose = frame.HasEyePose ? frame.LeftEye : PetFaces.Eye(frame.Expression, -1);
             PetEyePose rightPose = frame.HasEyePose ? frame.RightEye : PetFaces.Eye(frame.Expression, 1);
             leftPose.Height *= Math.Max(0.055, 1 - frame.Lid);
             rightPose.Height *= Math.Max(0.055, 1 - frame.Lid);
-            double eyeWidth = Math.Max(leftPose.Width, rightPose.Width);
-            double eyeHeight = Math.Max(leftPose.Height, rightPose.Height);
-            double eyeTilt = Math.Max(Math.Abs(leftPose.Tilt), Math.Abs(rightPose.Tilt));
-            double gazeScale = FitEyeGaze(gazeX, gazeY, eyeWidth, eyeHeight, eyeTilt, frame.Expression);
-            gazeX *= gazeScale;
-            gazeY *= gazeScale;
+
+            /* 转向走球面：两只眼睛共用 yaw / pitch，一次算好。 */
+            double fit = FitGaze(gazeX, gazeY, leftPose, rightPose);
+            double yaw, pitch;
+            PetGaze.Turn(gazeX * fit, gazeY * fit, out yaw, out pitch);
+
             for (int side = -1; side <= 1; side += 2)
             {
-                double x = side * 0.29 + gazeX;
                 PetEyePose pose = side < 0 ? leftPose : rightPose;
-                double y = 0.04 + gazeY + pose.OffsetY;
-                MeshGeometry3D eyeMesh = EyeMesh(x, y, pose.Width, pose.Height, pose.Tilt);
+                Point3D anchor = EyeAnchor(side, yaw, pitch);
+                MeshGeometry3D eyeMesh = EyePatch(anchor, pose.Width, pose.Height,
+                                                  pose.Tilt, pose.OffsetY);
                 GeometryModel3D eye = new GeometryModel3D(eyeMesh, eyes);
                 eye.BackMaterial = eyes;
                 scene.Children.Add(eye);
@@ -257,36 +398,34 @@ namespace WinIsland
                              centerY + dx * s + dy * c);
         }
 
-        static void AddSurfacePoint(MeshGeometry3D mesh, double x, double y)
-        {
-            double d = x * x + y * y;
-            if (d > MaxEyeRadius * MaxEyeRadius)
-            { double scale = MaxEyeRadius / Math.Sqrt(d); x *= scale; y *= scale; d = x * x + y * y; }
-            double bodyZ = Math.Sqrt(Math.Max(0.0, 1.0 - d));
-            double z = Math.Sqrt(Math.Max(0.0, EyeSurfaceRadius * EyeSurfaceRadius - d));
-            Vector3D normal = new Vector3D(x, y, bodyZ);
-            normal.Normalize();
-            Point3D point = new Point3D(x, y, z);
-            mesh.Positions.Add(point);
-            mesh.Normals.Add(normal);
-        }
-
         static Point Lerp(Point a, Point b, double t)
         {
             return new Point(a.X + (b.X - a.X) * t,
                              a.Y + (b.Y - a.Y) * t);
         }
 
-        static void AddTriangle(MeshGeometry3D mesh, Point a, Point b, Point c)
+        static void AddTriangle(MeshGeometry3D mesh, Point3D unitAnchor,
+                                Vector3D right, Vector3D up, Point a, Point b, Point c)
         {
             int index = mesh.Positions.Count;
-            AddSurfacePoint(mesh, a.X, a.Y);
-            AddSurfacePoint(mesh, b.X, b.Y);
-            AddSurfacePoint(mesh, c.X, c.Y);
+            AddSurfacePoint(mesh, unitAnchor, right, up, a.X, a.Y);
+            AddSurfacePoint(mesh, unitAnchor, right, up, b.X, b.Y);
+            AddSurfacePoint(mesh, unitAnchor, right, up, c.X, c.Y);
             mesh.TriangleIndices.Add(index);
             mesh.TriangleIndices.Add(index + 1);
             mesh.TriangleIndices.Add(index + 2);
         }
 
+        static void AddSurfacePoint(MeshGeometry3D mesh, Point3D unitAnchor,
+                                    Vector3D right, Vector3D up, double localX, double localY)
+        {
+            Point3D point = SurfacePoint(unitAnchor, right, up, localX, localY);
+            /* 法线取锚点法线就够：整个场景只有 AmbientLight，
+               明暗不随法线变（改动前后一致）。 */
+            Vector3D normal = new Vector3D(unitAnchor.X, unitAnchor.Y, unitAnchor.Z);
+            normal.Normalize();
+            mesh.Positions.Add(point);
+            mesh.Normals.Add(normal);
+        }
     }
 }

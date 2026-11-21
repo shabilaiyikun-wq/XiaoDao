@@ -48,7 +48,7 @@ pushd "%~dp0"
 
 rem The pet is a sibling tree; fail early and clearly if it is missing, instead
 rem of letting csc report CS2001 for seven files plus a missing resource.
-for %%F in (AnimationCore.cs PetClips.cs ReferenceClips.cs PetShape.cs PetAnim.cs Pet3D.cs Pet.cs grok-clips.json) do (
+for %%F in (AnimationCore.cs PetGaze.cs PetClips.cs ReferenceClips.cs PetShape.cs PetAnim.cs Pet3D.cs Pet.cs grok-clips.json) do (
   if not exist "%PET%\%%F" (
     echo [x] missing %PET%\%%F
     popd
@@ -89,6 +89,7 @@ rem to stay identical in both build scripts.
   Input.cs ^
   Shot.cs ^
   "%PET%\AnimationCore.cs" ^
+  "%PET%\PetGaze.cs" ^
   "%PET%\PetClips.cs" ^
   "%PET%\ReferenceClips.cs" ^
   "%PET%\PetShape.cs" ^
