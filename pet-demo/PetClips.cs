@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace WinIsland
 {
@@ -88,7 +89,51 @@ namespace WinIsland
           new PetClip{Name="idle-wink",Duration=4.2,Rotation=new PetTrack(K(0,0,0,0),K(1.3,0,-4,-7),K(2.3,0,-4,-7),K(3.4,0,0,0)),Expressions=new[]{new PetFaceKey(.65,PetExpression.Wink),new PetFaceKey(2.2,PetExpression.Happy),new PetFaceKey(3.4,PetExpression.Neutral)}},
           new PetClip{Name="idle-morph",Duration=5.2,Shape=1,Morph=new PetTrack(K(0,0),K(.8,0),K(.917,0),K(.94,1),K(.95,1),K(.97,0),K(5.2,0)),Squash=new PetTrack(K(0,1,1),K(1.3,.97,1.03),K(3.8,1,1)),Expressions=new[]{new PetFaceKey(.7,PetExpression.Curious),new PetFaceKey(1.06,PetExpression.Neutral)},Lids=Blink(.8)}
         };
-        public static readonly PetClip[] Idle = AuthoredIdle;
+        public static readonly PetClip[] Idle = BuildIdlePool();
+
+        /* 随机待机池 = 既有 7 段自制待机 + 28 段参考动画里除 Blocked_A 的 27 段（共 34 段）。
+
+           以前池子里只有那 7 段自制在转，参考动画只能从右键菜单手点：点一次播一次，
+           播完就回到 7 段里循环，等于 28 段做出来没进日常。现在它们进同一个池子，
+           洗牌仍然由 runtime 负责（PetAnim.NextClip → PetRandom.Shuffle：一次洗出
+           一整副牌，牌内天然不重复；换牌时再把与上一段相同的那张换出首位），
+           所以「相邻两段不重复」的判据不因为池子从 7 涨到 34 而失效。
+
+           为什么单独排掉 Blocked_A：它是「被拦住」的负向动作，表情走 confused→neutral，
+           在没有上下文的自播里只会读成「它卡住了」。手点「全部动画」仍然可以播它。
+
+           为什么 7 段自制排在最前：PetAnim 构造时拿 Idle[0] 当初始片段，
+           起手静止姿态因此与改动前逐帧一致（外观没变）。 */
+        static PetClip[] BuildIdlePool()
+        {
+            PetClip[] authored = AuthoredIdle;
+            List<PetClip> pool = new List<PetClip>(authored);
+            try
+            {
+                foreach (PetClipGroup group in ReferenceClips.Groups)
+                {
+                    for (int i = 0; i < group.Clips.Length; i++)
+                    {
+                        string name = group.Clips[i];
+                        if (name == ExcludedIdleReference) continue;
+                        PetClip clip = ReferenceClips.Find(name);
+                        if (clip != null) pool.Add(clip);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                /* 参考动画资源缺失或损坏时（ReferenceClips 静态构造会抛），退回 7 段自制。
+                   这条路径在改动前根本不碰 ReferenceClips，不能让新加的池子把
+                   「资源坏了岛就起不来」变成新故障。 */
+                return authored;
+            }
+            return pool.ToArray();
+        }
+
+        /* 随机待机里唯一被排掉的参考动画。改这个常量就是改随机池的组成。 */
+        const string ExcludedIdleReference = "Blocked_A";
+
         public static PetClip MorphDemo { get { return AuthoredIdle[6]; } }
         public static PetClip[] ForState(string s)
         { switch(s){case "happy":return new[]{ReferenceClips.Find("Done_A"),ReferenceClips.Find("Done_B"),ReferenceClips.Find("Done_C")};case "thinking":return new[]{ReferenceClips.Find("Working_A"),ReferenceClips.Find("Working_B"),ReferenceClips.Find("Working_C"),ReferenceClips.Find("Working_D"),ReferenceClips.Find("Working_E"),ReferenceClips.Find("Working_F")};case "sleepy":return new[]{ReferenceClips.Find("Blocked_C")};case "curious":return new[]{ReferenceClips.Find("Working_B")};case "morph":return new[]{AuthoredIdle[6]};default:return Idle;} }

@@ -52,6 +52,22 @@ namespace WinIsland
         double _downX, _downY;
         double _grabX, _grabY;
 
+        /* 当前有一个「文件」正被拖到球附近（OLE 已经把我们选为放置目标）。
+           只有它成立时才让眼睛跟手；普通鼠标移动、拖窗口、拖文本都不会置位。*/
+        bool _dragFiles;
+        /* 文件拖拽离开球体之后的延续跟随（见 OnDragLeaveFiles）。
+           OLE 只在球内通知我们，所以球外这一段靠「同一次拖拽 + 按键仍按着」延续。*/
+        bool _dragFollow;
+        /* 可被 OLE 命中的外圈半径（DIP，相对球心）。球内永远可命中；
+           球外只在外来拖拽进行中（按键按下）扩到这里 —— 这样文件从稍远处
+           拖过来就能被识别，不用先压到球上。代价见 OnHitTick 的注释。*/
+        const double ListenR = 260;
+        /* 当前是否正处于「可被 OLE 命中」的状态（只是诊断用） */
+        bool _oleVisible;
+        /* DragOver 诊断用的上一次记录位置（-9999 = 还没记过，NaN 比不过阈值） */
+        double _lookLogX = -9999, _lookLogY = -9999;
+        double _followLogX = -9999, _followLogY = -9999;
+
         bool _animating;
         double _lastRender = -1;
         double _lastAnimationTime;
@@ -131,6 +147,18 @@ namespace WinIsland
             root.Children.Add(stage);
 
             Content = root;
+
+            /* 文件拖动检测：只接事件，不改投放行为。
+               放置目标的注册本来就有（WPF 给每个 HwndSource 都注册了
+               OleDropTargetInterface，与 AllowDrop 无关，实测四个用例全 True），
+               而在此之前 AllowDrop=false 时 WPF 对任何拖放都回 None ——
+               球心这块区域现在就已经在拒绝投放。这里接上事件后仍然一律回 None，
+               所以投放行为与改动前逐字一致，多出来的只是「我们知道有人拖文件了」。*/
+            AllowDrop = true;
+            DragEnter += OnDragEnterFiles;
+            DragOver += OnDragOverFiles;
+            DragLeave += OnDragLeaveFiles;
+            Drop += OnDropFiles;
 
             RestorePosition();
 
@@ -399,10 +427,22 @@ namespace WinIsland
             double outSlack = _hover ? HoverSlack + 4.0 : HoverSlack;
             bool inside = dist <= BodyR + outSlack;
 
+            bool down = Native.LeftButtonDown();
+
+            /* 「能不能被 OLE 找到」和「鼠标是不是在球上」是两件事，必须分开。
+
+               以前穿透样式直接跟着 inside 走，于是 OLE 只有在球内才找得到我们 ——
+               文件必须先压到球上才认得出来（用户反馈：要拖很近才识别得到）。
+
+               现在：球内永远可命中；球外只在**有按键按下**（外来拖拽正在进行）
+               就把可命中范围扩到 ListenR。这只影响 WindowFromPoint 能不能命中，
+               鼠标交互（悬停 / 戳 / 拖窗口）仍然只看 inside —— 在外圈按一下不会
+               把桌宠拖走，也不会戳它。*/
+            bool oleVisible = inside || (down && dist <= ListenR);
+
             if (inside != _hover)
             {
                 _hover = inside;
-                ApplyClickThrough(!inside);
                 Trace("hover -> " + inside
                       + " cursor=" + cursorX.ToString("0.#") + "," + cursorY.ToString("0.#")
                       + " local=" + dx.ToString("0.#") + "," + dy.ToString("0.#")
@@ -411,7 +451,15 @@ namespace WinIsland
                       + " dpi=" + _dpi.ToString("0.###"));
             }
 
-            bool down = Native.LeftButtonDown();
+            if (oleVisible != _oleVisible)
+            {
+                _oleVisible = oleVisible;
+                Trace("ole visible=" + oleVisible + " dist=" + dist.ToString("0.0"));
+            }
+            /* 每拍都写一次：ApplyClickThrough 内部对「值没变」直接返回，
+               而别的分支（拖窗口、EndPress）也会改这个样式，所以不能只在
+               值变化时写 —— 否则会被那些分支留下的状态卡住。*/
+            ApplyClickThrough(!oleVisible);
 
             if (down && !_down)
             {
@@ -440,6 +488,44 @@ namespace WinIsland
             {
                 EndPress(inside);
             }
+
+            /* 球外延续跟随。走到这里说明光标已经离开球体（URL 那次 DragLeave
+               或者一直在外面绕），OLE 不再给位置，所以直接用这一拍的轮询结果。
+               一旦松手就彻底结束，眼睛滑回片段自己的张望轨道。*/
+            if (_dragFollow)
+            {
+                if (!down)
+                {
+                    _dragFollow = false;
+                    _dragFiles = false;
+                    _runtime.LookAway();
+                    Trace("drag follow ended look=" + _runtime.LookWeight.ToString("0.00"));
+                }
+                else
+                {
+                    FollowPointer(dx, dy, dist);
+                    /* 诊断：球外这一段靠轮询，日志是唯一证据 */
+                    if (Math.Abs(cursorX - _followLogX) + Math.Abs(cursorY - _followLogY) > 12)
+                    {
+                        _followLogX = cursorX; _followLogY = cursorY;
+                        Trace("follow local=" + dx.ToString("0.0") + "," + dy.ToString("0.0")
+                              + " dist=" + dist.ToString("0.0")
+                              + " gaze=" + _runtime.Frame.GazeX.ToString("0.00") + ","
+                              + _runtime.Frame.GazeY.ToString("0.00")
+                              + " look=" + _runtime.LookWeight.ToString("0.00"));
+                    }
+                }
+            }
+        }
+
+        /* 不限距离：一旦确认是文件拖拽，眼睛就一直看着光标（方向按 BodyR 归一化、
+               钳到 ±1，远处只是方向不变、偏转已满）。之前这里有个 220 DIP 的衰减，
+               实测下来「远一点就不跟了」，而用户要的是拖文件时一路都跟。*/
+        void FollowPointer(double dx, double dy, double dist)
+        {
+            double gx, gy;
+            LookDirection(dx, dy, out gx, out gy);
+            _runtime.LookAt(gx, gy);
         }
 
         void EndPress(bool inside)
@@ -482,6 +568,132 @@ namespace WinIsland
             Native.SetExStyle(_hwnd, new IntPtr(v));
 
             Trace("style write ignore=" + ignore);
+        }
+
+        /* ------------------------------------------------ 文件拖动时的注视
+
+           规则：只有「正在拖文件」且「光标在球附近」两个条件同时成立，眼睛才
+           跟鼠标；普通移动、拖窗口、拖文本一律继续随机张望。两个条件都不是猜的：
+
+             * 是不是文件 —— 由 OLE 交到放置目标手里的 IDataObject
+               （GetDataPresent(FileDrop)）。这是唯一能把「拖文件」和「拖文本 /
+               框选 / 拖窗口」分开的地方：后面的几种根本没有 IDataObject，
+               全局钩子也只能看到按钮和坐标，看不到被拖的内容。
+             * 在不在附近 —— OLE 用 WindowFromPoint 投递，而本窗口只有在球附近
+               （OnHitTick 的 hover 判定，半径 BodyR+HoverSlack）才关掉
+               WS_EX_TRANSPARENT。能收到 DragEnter 本身就等于「鼠标进来了」，
+               不需要自己再拿光标位置去比。
+
+           结束与取消都收得到：正常放开走 Drop，拖到别处走 DragLeave，
+           按 Esc 取消 OLE 也会发 DragLeave。三个口子都归一成 _dragFiles=false
+           和 LookAway()，权重自己滑到 0，眼睛就平滑地回到片段自己的张望轨道。*/
+        void OnDragEnterFiles(object sender, DragEventArgs e)
+        {
+            bool files = e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+            LookAtScreenDip(e.GetPosition(this), files);
+            Trace("drag enter files=" + files + " follow=" + _dragFiles
+                  + " look=" + _runtime.LookWeight.ToString("0.00")
+                  + " formats=[" + (e.Data == null ? "null" : string.Join(",", e.Data.GetFormats())) + "]");
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        /* 「与窗口无关」的核心：中继窗口和桌宠自己的放置目标都走这里。
+           p 是**桌宠窗口本地 DIP**，files 表示 OLE 是否声明了 FileDrop。*/
+        internal void LookAtScreenDip(Point p, bool files)
+        {
+            if (files)
+            {
+                _dragFiles = true;
+                _dragFollow = false;      /* OLE 又在给权威位置了，延续模式让位 */
+                LookAtPointer(p);
+            }
+            else
+            {
+                /* 拖的是文本 / 链接之类：不跟手，并且保证上一轮的权重归零 */
+                _dragFiles = false;
+                _runtime.LookAway();
+            }
+        }
+
+        void OnDragOverFiles(object sender, DragEventArgs e)
+        {
+            Point p = e.GetPosition(this);
+            if (_dragFiles) LookAtPointer(p);
+            /* 诊断：证明 DragOver 真的重复到达，而且交给渲染的帧确实拿到了视线。
+               只在光标明显移动时记一行，拖动时不会刷屏。*/
+            if (_dragFiles && (Math.Abs(p.X - _lookLogX) + Math.Abs(p.Y - _lookLogY)) > 6)
+            {
+                _lookLogX = p.X; _lookLogY = p.Y;
+                Trace("drag over p=" + Math.Round(p.X, 1) + "," + Math.Round(p.Y, 1)
+                      + " gaze=" + _runtime.Frame.GazeX.ToString("0.00") + ","
+                      + _runtime.Frame.GazeY.ToString("0.00")
+                      + " look=" + _runtime.LookWeight.ToString("0.00"));
+            }
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        void OnDragLeaveFiles(object sender, DragEventArgs e)
+        {
+            DragLeft();
+            e.Handled = true;
+        }
+
+        void OnDropFiles(object sender, DragEventArgs e)
+        {
+            /* 不接受：回答 None，和改动前（AllowDrop=false 时 WPF 自己的回答）一致 */
+            Trace("drop refused look=" + _runtime.LookWeight.ToString("0.00"));
+            DragDropped();
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        internal void DragLeft()
+        {
+            /* 文件拖拽离开了球体：此时还没有结束 —— 用户可能只是把文件
+               拖到桌宠旁边。OLE 只在球内通知我们，所以从这里开始转入
+               「同一次已被 OLE 确认的拖拽 + 按键仍按着」的延续跟随，
+               松手（或下一次 Drop）就结束。检测本身仍然只靠 OLE。*/
+            if (_dragFiles)
+            {
+                _dragFollow = true;
+                Trace("drag leave -> follow continues look=" + _runtime.LookWeight.ToString("0.00"));
+            }
+            else
+            {
+                /* 非文件拖拽：本来就没跟，这里保证权重一定是 0 */
+                _dragFollow = false;
+                _runtime.LookAway();
+            }
+        }
+
+        internal void DragDropped()
+        {
+            _dragFiles = false;
+            _dragFollow = false;
+            _runtime.LookAway();
+        }
+
+        /* 偏移 → 视线方向：+X 向右、+Y 向上（Pet3D 的 Y 轴朝上，
+           作者写的 idle-look-up 用的就是 +0.62），所以纵向取反。
+           除以 BodyR 而不是命中半径：贴到球边就给满偏转。
+           **不限距离** —— 远处算出来是同一个方向（钳到 ±1），
+           这是「拖文件时一路都跟」的实现基础。*/
+        static void LookDirection(double dx, double dy, out double gx, out double gy)
+        {
+            gx = dx / BodyR;
+            gy = -dy / BodyR;
+            if (gx < -1) gx = -1; else if (gx > 1) gx = 1;
+            if (gy < -1) gy = -1; else if (gy > 1) gy = 1;
+        }
+
+        void LookAtPointer(Point p)
+        {
+            const double centre = Size / 2.0;
+            double gx, gy;
+            LookDirection(p.X - centre, p.Y - centre, out gx, out gy);
+            _runtime.LookAt(gx, gy);
         }
 
         /* ------------------------------------------------------------ 日志 */
@@ -540,9 +752,14 @@ namespace WinIsland
                 PetInput recoveredProbe = probeIn;
                 recoveredProbe.SpinAge = 0.96;
                 PetFrame recoveredFrame = PetAnim.Sample(recoveredProbe);
+                /* 判据要跟待机池的组成无关：不再拿绝对 Yaw 去比 π，而是比同一时刻
+                   「有冲量」和「没冲量」的差。待机池从 27 段扩到 34 段之后，
+                   t=12.8s 落在哪段参考动画已经变了，绝对角度本来就不稳；
+                   差值是冲量自己的贡献（Age 0.475 / Duration 0.9 → π·1.087 ≈ 3.42 rad）。*/
+                PetFrame spinBaseFrame = PetAnim.Sample(probeIn);
                 bool spinTransition = spinningFrame.State == "spin"
-                                   && spinningFrame.Yaw > Math.PI
-                                   && spinningFrame.Expression == PetExpression.Happy;
+                                   && spinningFrame.Expression == PetExpression.Happy
+                                   && Math.Abs(spinningFrame.Yaw - spinBaseFrame.Yaw) > 2.0;
                 bool interactionRecovery = recoveredFrame.State == a.State
                                         && recoveredFrame.Yaw == a.Yaw;
 
@@ -584,6 +801,107 @@ namespace WinIsland
                     if (wandering.GazeX > maxGaze) maxGaze = wandering.GazeX;
                 }
                 bool wanderingRangeVisible = maxGaze - minGaze > 1.1;
+
+                /* ------------------------------------------------ 文件拖动注视
+
+                   三条判据 + 一条防穿模：拖文件时跟手、方向对、普通鼠标不跟，
+                   松手后平滑回到片段自己的张望。全部走生产用的
+                   PetAnimationRuntime，不另写一份逻辑。*/
+                const double RampSeconds = 1.0;
+                int rampSteps = (int)Math.Round(RampSeconds / PetAnimationRuntime.Step);
+
+                /* 1) 拖文件时跟手，且方向与目标一致 */
+                PetAnimationRuntime lookA = new PetAnimationRuntime(17);
+                lookA.LookAt(0.85, -0.60);
+                double maxLookJump = 0.0;
+                double prevGazeX = lookA.Frame.GazeX;
+                for (int i = 0; i < rampSteps; i++)
+                {
+                    lookA.Advance(PetAnimationRuntime.Step);
+                    double jump = Math.Abs(lookA.Frame.GazeX - prevGazeX);
+                    if (jump > maxLookJump) maxLookJump = jump;
+                    prevGazeX = lookA.Frame.GazeX;
+                }
+                bool dragGazeFollows = Math.Abs(lookA.Frame.GazeX - 0.85) < 0.02
+                                    && Math.Abs(lookA.Frame.GazeY + 0.60) < 0.02
+                                    && lookA.LookWeight > 0.999;
+
+                /* 2) 反向：目标换到左下，眼睛必须跟着换向 */
+                PetAnimationRuntime lookB = new PetAnimationRuntime(17);
+                lookB.LookAt(-0.85, 0.60);
+                for (int i = 0; i < rampSteps; i++) lookB.Advance(PetAnimationRuntime.Step);
+                bool dragGazeDirectional = lookB.Frame.GazeX < -0.80
+                                        && lookB.Frame.GazeY > 0.55
+                                        && Math.Abs(lookB.Frame.GazeX - lookA.Frame.GazeX) > 1.6;
+
+                /* 3) 普通鼠标移动不触发：从没 LookAt 过的 runtime，权重恒为 0，
+                      且同一时刻的视线与「指针输入不同」无关 —— 让 gazeIgnoresPointer
+                      仍然成立（那条断言测的就是「普通移动鼠标不改变视线」）。*/
+                PetAnimationRuntime lookNone = new PetAnimationRuntime(17);
+                for (int i = 0; i < rampSteps; i++) lookNone.Advance(PetAnimationRuntime.Step);
+                bool normalMouseNoLook = lookNone.LookWeight == 0.0;
+
+                /* 4) 结束后平滑恢复：先看 1s，再松手 1s，必须回到「从没看过」的
+                      同种类 runtime 的同一帧；恢复过程每帧不许跳变。*/
+                PetAnimationRuntime lookThenBack = new PetAnimationRuntime(17);
+                lookThenBack.LookAt(0.85, -0.60);
+                for (int i = 0; i < rampSteps; i++) lookThenBack.Advance(PetAnimationRuntime.Step);
+                lookThenBack.LookAway();
+                double maxRestoreJump = 0.0;
+                prevGazeX = lookThenBack.Frame.GazeX;
+                for (int i = 0; i < rampSteps; i++)
+                {
+                    lookThenBack.Advance(PetAnimationRuntime.Step);
+                    double jump = Math.Abs(lookThenBack.Frame.GazeX - prevGazeX);
+                    if (jump > maxRestoreJump) maxRestoreJump = jump;
+                    prevGazeX = lookThenBack.Frame.GazeX;
+                }
+                bool dragGazeRestores = Math.Abs(lookThenBack.Frame.GazeX - lookNone.Frame.GazeX) < 1e-9
+                                     && Math.Abs(lookThenBack.Frame.GazeY - lookNone.Frame.GazeY) < 1e-9
+                                     && lookThenBack.LookWeight == 0.0;
+
+                /* 进和出都要是「滑」不是「跳」：单帧位移远小于整段行程 */
+                bool dragGazeSmooth = maxLookJump < 0.08 && maxRestoreJump < 0.08;
+
+                /* 4b) 跟随不限距离：饱和之后，300 / 600 / 1200 DIP 必须给出同一个偏转，
+                       以前这里有个 220 DIP 的衰减，实测「远一点就不跟了」，
+                       所以判据钉住「远处等价 + 已满偏转」，而不是钉住衰减曲线。*/
+                bool followReachesAtAnyDistance = true;
+                double refGx = 0, refGy = 0;
+                double[] probeDists = new double[] { 300, 600, 1200 };
+                for (int i = 0; i < probeDists.Length; i++)
+                {
+                    double gx, gy;
+                    LookDirection(probeDists[i] * 0.6, probeDists[i] * 0.8, out gx, out gy);
+                    if (i == 0) { refGx = gx; refGy = gy; }
+                    else if (Math.Abs(gx - refGx) > 1e-9 || Math.Abs(gy - refGy) > 1e-9)
+                        followReachesAtAnyDistance = false;
+                }
+                /* 方向必须是右下，且已经饱和 —— 光「三处相等」不够，
+                   全都算成 0 也相等，那就测不出跟不跟。 */
+                if (!(refGx > 0.99 && refGy < -0.99)) followReachesAtAnyDistance = false;
+
+                /* 5) 满偏转不过球：±1 的视线喂进去，眼睛中心仍在球面内。
+                      防穿模本身在 PetShape.EyePair（0.92 球面归一 + z<0.12 剔除）
+                      和 Pet3D.GazeShift（±1 钳制）里，这里只钉住「喂满也安全」。*/
+                bool extremeLookStaysOnBody = true;
+                for (int gx = -1; gx <= 1; gx += 2)
+                {
+                    for (int gy = -1; gy <= 1; gy += 2)
+                    {
+                        Geometry extreme = PetShape.EyePair(BodyR, gx, gy, 0, 0, 0,
+                            PetExpression.Neutral, EyeW, EyeH);
+                        GeometryGroup group = extreme as GeometryGroup;
+                        if (group == null) { extremeLookStaysOnBody = false; continue; }
+                        for (int i = 0; i < group.Children.Count; i++)
+                        {
+                            Rect eyeBox = group.Children[i].Bounds;
+                            double cxp = eyeBox.Left + eyeBox.Width / 2.0;
+                            double cyp = eyeBox.Top + eyeBox.Height / 2.0;
+                            if (Math.Sqrt(cxp * cxp + cyp * cyp) > BodyR) extremeLookStaysOnBody = false;
+                        }
+                    }
+                }
 
                 /* 旋转和俯仰要改变身体投影，表情要改变眼睛几何。 */
                 Rect frontBounds = PetShape.Body(BodyR, 0, 1, 1, 0, 0).Bounds;
@@ -695,20 +1013,37 @@ namespace WinIsland
                     if (fr.MorphAmount > 0.05 && fr.Lid < 0.9) { morphBehindBlink = false; break; }
                 }
 
-                /* Idle morphs should happen briefly and settle back to the reference ball. */
+                /* Idle morphs should happen briefly and settle back to the reference ball.
+
+                   采样窗口不能写死。实测：整段「所有片段时长之和」（34 段 = 151.3s）
+                   仍然会漏掉一两段 —— 起点 idle-rest 是构造时直接设的，洗牌在第一次
+                   NextClip 才发生，所以这一段窗口刚好差一点点，缺的那一段里就包含
+                   idle-morph，于是判据假红。这里改成跑到「池子里每段都出现过」为止，
+                   并把这件事本身也作为判据（idlePoolFullyPlayed），
+                   以后再往池子里加片段，这条会自己跟着走。
+
+                   顺带：用 runtime 逐帧推进，而不是反复调 PetAnim.Sample ——
+                   后者每次都从 0 重算，两轮下来会退化成平方复杂度。*/
                 bool idleShapeReturnsToBall = true;
                 bool idleShapeMorphs = false;
-                for (int i = 0; i < 1000; i++)
+                PetAnimationRuntime shapeRun = new PetAnimationRuntime(17);
+                HashSet<string> shapeSeen = new HashSet<string>();
+                double idleCycleSeconds = 0;
+                for (int i = 0; i < PetClips.Idle.Length; i++)
+                    idleCycleSeconds += PetClips.Idle[i].Duration;
+                int shapeCap = (int)Math.Ceiling(idleCycleSeconds * 2.2 / PetAnimationRuntime.Step);
+                for (int i = 0; i < shapeCap; i++)
                 {
-                    PetInput s = probeIn;
-                    s.Time = i * 0.1;
-                    PetFrame fr = PetAnim.Sample(s);
-                    double segLocal = s.Time - Math.Floor(s.Time / 9.0) * 9.0;
+                    shapeRun.Advance(PetAnimationRuntime.Step);
+                    PetFrame fr = shapeRun.Frame;
+                    shapeSeen.Add(fr.State);
                     if (fr.State == "idle-morph" && fr.MorphAmount > 0.02)
                         idleShapeMorphs = true;
                     if (fr.State != "idle-morph" && Math.Abs(fr.MorphAmount) > 0.001)
                         idleShapeReturnsToBall = false;
+                    if (idleShapeMorphs && shapeSeen.Count >= PetClips.Idle.Length) break;
                 }
+                bool idlePoolFullyPlayed = shapeSeen.Count >= PetClips.Idle.Length;
 
                 /* 用偏转视线检查眼睛靠近球面边缘时仍保持胶囊轮廓。 */
                 StopAnimating();
@@ -835,7 +1170,10 @@ namespace WinIsland
                                      && backgroundBrush.Color.A == 0;
                 bool transparentOk = transparentWindow && transparentBrush;
 
-                bool ok = deterministic && pokeTransition && spinTransition && interactionRecovery && idleClipVariety && gazeRangeVisible && gazeIgnoresPointer && wanderingRangeVisible && idleExpressionVariety && morphBehindBlink && idleShapeReturnsToBall && idleShapeMorphs && turnProjectionChanges && pitchProjectionChanges && spinHidesFace && capsuleEyes && sphereMeshOk && eyeMeshOk && eyeProjectedShapeOk && eyeSurfaceOk && gazeSurfaceOk && expressionChangesEyes && sizeOk && purpleOk && purpleBaseOk && flatBodyColor && eyesOk && transparentOk;
+                bool ok = deterministic && pokeTransition && spinTransition && interactionRecovery && idleClipVariety && gazeRangeVisible && gazeIgnoresPointer && wanderingRangeVisible && idleExpressionVariety && morphBehindBlink && idleShapeReturnsToBall && idleShapeMorphs && turnProjectionChanges && pitchProjectionChanges && spinHidesFace && capsuleEyes && sphereMeshOk && eyeMeshOk && eyeProjectedShapeOk && eyeSurfaceOk && gazeSurfaceOk && expressionChangesEyes && sizeOk && purpleOk && purpleBaseOk && flatBodyColor && eyesOk && transparentOk
+                        && dragGazeFollows && dragGazeDirectional && normalMouseNoLook
+                        && dragGazeRestores && dragGazeSmooth && followReachesAtAnyDistance && extremeLookStaysOnBody
+                        && idlePoolFullyPlayed;
 
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
                 sb.AppendLine("{");
@@ -847,6 +1185,15 @@ namespace WinIsland
                 sb.AppendLine("  \"idleClipVariety\": " + (idleClipVariety ? "true" : "false") + ",");
                 sb.AppendLine("  \"gazeRangeVisible\": " + (gazeRangeVisible ? "true" : "false") + ",");
                 sb.AppendLine("  \"gazeIgnoresPointer\": " + (gazeIgnoresPointer ? "true" : "false") + ",");
+                sb.AppendLine("  \"dragGazeFollows\": " + (dragGazeFollows ? "true" : "false") + ",");
+                sb.AppendLine("  \"dragGazeDirectional\": " + (dragGazeDirectional ? "true" : "false") + ",");
+                sb.AppendLine("  \"normalMouseNoLook\": " + (normalMouseNoLook ? "true" : "false") + ",");
+                sb.AppendLine("  \"dragGazeRestores\": " + (dragGazeRestores ? "true" : "false") + ",");
+                sb.AppendLine("  \"dragGazeSmooth\": " + (dragGazeSmooth ? "true" : "false") + ",");
+                sb.AppendLine("  \"dragGazeMaxJump\": " + maxLookJump.ToString("0.0000") + ",");
+                sb.AppendLine("  \"dragGazeMaxRestoreJump\": " + maxRestoreJump.ToString("0.0000") + ",");
+                sb.AppendLine("  \"followReachesAtAnyDistance\": " + (followReachesAtAnyDistance ? "true" : "false") + ",");
+                sb.AppendLine("  \"extremeLookStaysOnBody\": " + (extremeLookStaysOnBody ? "true" : "false") + ",");
                 sb.AppendLine("  \"wanderingRangeVisible\": " + (wanderingRangeVisible ? "true" : "false") + ",");
                 sb.AppendLine("  \"idleExpressionVariety\": " + (idleExpressionVariety ? "true" : "false") + ",");
                 sb.AppendLine("  \"pokeTransition\": " + (pokeTransition ? "true" : "false") + ",");
@@ -869,6 +1216,10 @@ namespace WinIsland
                 sb.AppendLine("  \"morphBehindBlink\": " + (morphBehindBlink ? "true" : "false") + ",");
                 sb.AppendLine("  \"idleShapeReturnsToBall\": " + (idleShapeReturnsToBall ? "true" : "false") + ",");
                 sb.AppendLine("  \"idleShapeMorphs\": " + (idleShapeMorphs ? "true" : "false") + ",");
+                sb.AppendLine("  \"idlePoolFullyPlayed\": " + (idlePoolFullyPlayed ? "true" : "false") + ",");
+                sb.AppendLine("  \"idlePoolClips\": " + PetClips.Idle.Length + ",");
+                sb.AppendLine("  \"idlePoolSeen\": " + shapeSeen.Count + ",");
+                sb.AppendLine("  \"idlePoolCycleSeconds\": " + idleCycleSeconds.ToString("0.0") + ",");
                 sb.AppendLine("  \"breathRange\": " + breathRange.ToString("0.0000") + ",");
                 sb.AppendLine("  \"bodyRatio\": " + ratio.ToString("0.000") + ",");
                 sb.AppendLine("  \"bodyRatioOk\": " + (sizeOk ? "true" : "false") + ",");

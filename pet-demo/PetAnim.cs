@@ -37,6 +37,39 @@ namespace WinIsland
         }
         public PetFrame Frame{get{return current;}}
         public string State{get{return state;}}
+
+        /* ---------------------------------------------------- 指针注视
+
+           为什么要有这条通道：眼睛方向一直只由片段里的 Gaze 轨道决定，
+           外部想让它「看某个点」没有任何入口（PetInput 的 HasGaze/GazeX/GazeY
+           从来没有被读过，自检里那条 gazeIgnoresPointer 就是这件事的见证）。
+
+           这里加的是**权重混合**，不是替换：片段自己的轨道仍然是底稿，
+           权重 0 时输出与改动前逐位相同；权重到 1 才完全看向 lookX/lookY。
+           进和出都先按 LookRamp 线性爬到目标，再经 PetEase.Smooth 映射成曲线，
+           所以「文件拖走后眼睛滑回随机张望」不需要额外的定时器或状态机 ——
+           LookAway() 之后权重自己降到 0，底稿重新显形。
+
+           防穿模不在这里做：GazeX/GazeY 只是方向参数，下游
+           Pet3D.GazeShift 先钳到 ±1，PetShape.EyePair 再把眼球向量压到半径
+           0.92 的球面内、z<0.12 剔除背面。喂到 ±1 也已经过同一道闸。 */
+        bool lookOn;
+        double lookX,lookY,lookWeight,lookAmp;
+        const double LookRamp=.30;
+        public double LookWeight{get{return lookWeight;}}
+        public void LookAt(double x,double y){LookAt(x,y,1.0);}
+
+        /* amount = 这一眼的强度（0..1）。球内是 1；离开球体之后按距离衰减，
+           权重跟着降到 0，眼睛就平滑地交还给片段自己的 Gaze 轨道 ——
+           而不是突然停在某个方向上。 */
+        public void LookAt(double x,double y,double amount)
+        {
+            if(x<-1)x=-1;if(x>1)x=1;
+            if(y<-1)y=-1;if(y>1)y=1;
+            if(amount<0)amount=0;if(amount>1)amount=1;
+            lookX=x;lookY=y;lookAmp=amount;lookOn=amount>0.001;
+        }
+        public void LookAway(){lookOn=false;}
         public void SetState(string value){if(state==value)return;state=value;clips=PetClips.ForState(value);bag=null;previous=-1;NextClip();}
         public void PlayClip(string name)
         {
@@ -91,6 +124,17 @@ namespace WinIsland
                 if(p.Age>=p.Duration){impulses.RemoveAt(i);continue;}
                 p.Apply(ref f);wanted=p.Spin?PetExpression.Happy:PetExpression.Surprised;
                 f.State=p.Spin?"spin":"poked";impulses[i]=p;
+            }
+            /* 指针注视混合。放在冲量之后、表情混合之前：冲量改的是旋转/缩放，
+               不碰视线，所以两者互不覆盖；表情混合只读 Expression。 */
+            double lookTarget=lookOn?lookAmp:0.0;
+            if(lookWeight<lookTarget)lookWeight=Math.Min(lookTarget,lookWeight+Step/LookRamp);
+            else if(lookWeight>lookTarget)lookWeight=Math.Max(lookTarget,lookWeight-Step/LookRamp);
+            if(lookWeight>0)
+            {
+                double w=AnimationMath.Bezier(lookWeight,PetEase.Smooth);
+                f.GazeX=AnimationMath.Lerp(f.GazeX,lookX,w);
+                f.GazeY=AnimationMath.Lerp(f.GazeY,lookY,w);
             }
             if(wanted!=expression){leftFrom=left;rightFrom=right;expression=wanted;faceTime=0;}
             faceTime=Math.Min(.28,faceTime+Step);double blend=AnimationMath.Bezier(faceTime/.28,PetEase.Smooth);
