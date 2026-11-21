@@ -374,6 +374,13 @@ namespace WinIsland
         int _handle;
         bool _reported;
         bool _restoreOnFail;
+        /* 唤起时默认给的是**整屏选区**，这个标记表示「用户还没动过它」。
+           在它成立时按下鼠标：拖动 = 自己框一块，只点一下 = 确认整屏。
+           两者靠「松手时有没有拖出有效尺寸」区分，不靠点击次数 ——
+           所以不会和「点一下确认」抢同一个动作。 */
+        bool _fresh;
+        /* 这一轮拖动是从默认整屏那一下开始的（用来判定「单击 = 截全屏」） */
+        bool _freshDrag;
         System.Drawing.Bitmap _result;
 
         public ShotOverlay(System.Drawing.Bitmap bmp, double scale,
@@ -382,7 +389,15 @@ namespace WinIsland
             _bmp = bmp;
             _scale = scale > 0 ? scale : 1.0;
             _done = done;
-            _rect = new Rect(0, 0, 0, 0);
+
+            /* 唤起即整屏选中。以前这里是个空框、状态 Idle，于是必须先拖一下
+               才有选区 —— 而「先点一下再拖」又和「点一下确认」撞车。
+               现在默认就有选区：点一下就是截全屏，拖动才是自己框。 */
+            _rect = new Rect(0, 0,
+                             Math.Max(1, SystemParameters.VirtualScreenWidth),
+                             Math.Max(1, SystemParameters.VirtualScreenHeight));
+            _mode = Mode.Adjust;
+            _fresh = true;
 
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
@@ -454,7 +469,13 @@ namespace WinIsland
                键盘焦点落在窗口本身时不同版本输入栈的路由不完全一致。 */
             KeyDown += OnKey;
 
-            Loaded += delegate { Update(); };
+            Loaded += delegate
+            {
+                Shot.Log("shot open default " + Math.Round(_rect.Width) + "x"
+                         + Math.Round(_rect.Height) + " fresh=" + _fresh
+                         + " mode=" + _mode);
+                Update();
+            };
         }
 
         /* 工具条：尺寸文字 + ✓ + ✗。
@@ -567,7 +588,7 @@ namespace WinIsland
             t.FontFamily = new FontFamily(Ui.FontUi);
             t.FontSize = 12.5;
             t.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xEC, 0xF2));
-            t.Text = "拖动选择区域  ·  松手后拖边角可微调  ·  Enter 完成  ·  Esc 取消";
+            t.Text = "点一下截全屏  ·  拖动可自己框选  ·  松手后拖边角微调  ·  Enter 完成  ·  Esc 取消";
             b.Child = t;
             return b;
         }
@@ -597,6 +618,18 @@ namespace WinIsland
             if (_mode == Mode.Idle)
             {
                 _restoreOnFail = false;
+                BeginDrag(p);
+                return;
+            }
+
+            /* 默认整屏还没被动过：按下就意味着「我要自己框一块」，
+               而不是「搬动这个满屏的框」（满屏框也搬不动）。
+               于是直接起新框；如果松手时没拖出尺寸，就按「单击 = 截全屏」处理。 */
+            if (_fresh)
+            {
+                _rect0 = _rect;
+                _restoreOnFail = true;
+                _freshDrag = true;
                 BeginDrag(p);
                 return;
             }
@@ -681,10 +714,26 @@ namespace WinIsland
                 if (ok)
                 {
                     _restoreOnFail = false;
+                    _fresh = false;
+                    _freshDrag = false;
                     _mode = Mode.Adjust;
                     Update();
                     Shot.Log("shot drag done " + Math.Round(_rect.Width) + "x"
                              + Math.Round(_rect.Height));
+                    return;
+                }
+
+                /* 从默认整屏那一下开始、又没有拖出尺寸 —— 这就是「点了一下」。
+                   把整屏选区还原回来并直接确认：点一下即截全屏。 */
+                if (_freshDrag)
+                {
+                    _freshDrag = false;
+                    _rect = _rect0;
+                    _mode = Mode.Adjust;
+                    Update();
+                    Shot.Log("shot click = full screen "
+                             + Math.Round(_rect.Width) + "x" + Math.Round(_rect.Height));
+                    Accept();
                     return;
                 }
 
@@ -757,6 +806,8 @@ namespace WinIsland
 
         void UpdateCursor(Point p)
         {
+            /* 默认整屏时整屏都在框内 —— 用 SizeAll 会让人以为可以把整屏框搬走 */
+            if (_fresh) { Cursor = Cursors.Cross; return; }
             int h = HitHandle(p);
             if (h != 0) { Cursor = HandleCursor(h); return; }
             if (_rect.Contains(p)) { Cursor = Cursors.SizeAll; return; }
@@ -844,15 +895,24 @@ namespace WinIsland
             Place(_maskRight, r.X + r.Width, r.Y, cw - (r.X + r.Width), r.Height);
 
             _frame.Visibility = Visibility.Visible;
-            Place(_frame, r.X, r.Y, r.Width, r.Height);
+            /* 整屏框的描边是沿线居中的，画在 0/Width 处会被窗口裁掉一半。
+               默认整屏时往里收 1px，让那条线整条可见 —— 只影响提示，不影响截取范围。 */
+            if (_fresh)
+                Place(_frame, r.X + 1, r.Y + 1,
+                      Math.Max(0, r.Width - 2), Math.Max(0, r.Height - 2));
+            else
+                Place(_frame, r.X, r.Y, r.Width, r.Height);
 
             _barSize.Text = ((int)Math.Round(r.Width * _scale)) + " × "
                             + ((int)Math.Round(r.Height * _scale));
             _bar.Visibility = Visibility.Visible;
             PositionBar(cw, ch, r);
 
-            /* 拖初始框的时候不显示把手，减少干扰 */
-            bool adj = _mode == Mode.Adjust || _mode == Mode.Moving || _mode == Mode.Resizing;
+            /* 拖初始框的时候不显示把手，减少干扰。
+               默认整屏也不显示：那些把手正好落在屏幕四边，一半在窗口之外，
+               既拉不动也不好看；一旦自己框出一块，把手就回来了。 */
+            bool adj = !_fresh && (_mode == Mode.Adjust || _mode == Mode.Moving
+                                   || _mode == Mode.Resizing);
             ShowHandles(adj);
             if (adj) PositionHandles(r);
         }
