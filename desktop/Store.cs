@@ -47,6 +47,10 @@ namespace WinIsland
            那些模式一律不自动拉桌宠，也绝不回写这一项。 */
         public static bool Pet = true;
 
+        /* 天气城市。空 = 按网络出口自动定位。
+           填了就用填的 —— 这台机器挂着代理，IP 出口在美国，自动定位会给出加州。 */
+        public static string WeatherCity = "";
+
         public static void Load()
         {
             string[] lines = AppDir.ReadLines("ui.txt");
@@ -64,6 +68,7 @@ namespace WinIsland
                 else if (k == "capture") Capture = (v != "0");
                 else if (k == "transferOut") TransferOut = (v != "0");
                 else if (k == "pet") Pet = (v != "0");
+                else if (k == "weatherCity") WeatherCity = AppDir.Decode(v);
             }
         }
 
@@ -80,19 +85,42 @@ namespace WinIsland
             lines.Add("capture=" + (Capture ? "1" : "0"));
             lines.Add("transferOut=" + (TransferOut ? "1" : "0"));
             lines.Add("pet=" + (Pet ? "1" : "0"));
+            /* 城市可能是中文，走 base64；空值也照写一行（去城市 = 自动定位） */
+            lines.Add("weatherCity=" + AppDir.Encode(WeatherCity == null ? "" : WeatherCity));
             AppDir.WriteLines("ui.txt", lines);
+        }
+
+        /// <summary>
+        /// 只改了一个偏好（比如天气城市）之后把它落盘。
+        /// 场景/外观/取材这三项由 Save 管，这里原样带上当前值，不覆盖任何人。
+        /// </summary>
+        public static void Flush()
+        {
+            Save(Scene, Look, Art);
         }
     }
 
     /* 本地数据目录。%APPDATA%\WinIsland —— 和窗口位置文件放在一起。 */
     static class AppDir
     {
+        /* 数据目录可以被顶掉。用途只有一个：自检要写待办、剪贴板、中转站这些
+           **有副作用**的 store，如果直接写 %APPDATA%\WinIsland，跑一次自检就会
+           往用户的真实待办里塞一条「自检：15 分钟后到点」，还会把列表第 0 条
+           ——也就是用户最老的那一条——勾成已完成（Todos.Toggle(0)）。
+           所以自检必须先 SetRoot 到一个临时目录（见 Program.cs）。
+           正常启动永远不调它，Root 仍是 %APPDATA%\WinIsland。 */
+        static string _override;
+
+        public static void SetRoot(string dir) { _override = dir; }
+
         public static string Root
         {
             get
             {
-                string d = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WinIsland");
+                string d = _override;
+                if (string.IsNullOrEmpty(d))
+                    d = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WinIsland");
                 try { if (!Directory.Exists(d)) Directory.CreateDirectory(d); }
                 catch { }
                 return d;
@@ -448,6 +476,19 @@ namespace WinIsland
         /* dueMinutes > 0 表示「多少分钟后到点」 */
         public static void Add(string text, int dueMinutes)
         {
+            AddDue(text, dueMinutes > 0 ? DateTime.Now.AddMinutes(dueMinutes) : DateTime.MinValue);
+        }
+
+        /* 自检专用：直接指定到点时刻。
+           生产路径只有 Add(text, minutes)，而「到点提醒」这条要验就得有一条
+           已经到点的待办 —— 用 Add(1) 然后等一分钟不叫验证，叫加班。 */
+        public static void AddWithDue(string text, DateTime due)
+        {
+            AddDue(text, due);
+        }
+
+        static void AddDue(string text, DateTime due)
+        {
             if (text == null) return;
             text = text.Trim();
             if (text.Length == 0) return;
@@ -462,7 +503,7 @@ namespace WinIsland
                 TodoItem it = new TodoItem();
                 it.Text = text;
                 it.Done = false;
-                if (dueMinutes > 0) it.Due = DateTime.Now.AddMinutes(dueMinutes);
+                it.Due = due;
                 _items.Add(it);
                 Save();
             }
@@ -494,6 +535,19 @@ namespace WinIsland
                 Save();
             }
             Interlocked.Increment(ref _version);
+        }
+
+        /* 某一条现在是勾上还是没勾。
+           给「勾完待办 → 桌宠庆祝」用：Toggle 是翻转，翻完得回头看方向 ——
+           取消勾选不该庆祝。越界或还没加载就返回 false，不抛。 */
+        public static bool IsDone(int index)
+        {
+            lock (_lock)
+            {
+                Ensure();
+                if (index < 0 || index >= _items.Count) return false;
+                return _items[index].Done;
+            }
         }
 
         /* 取出「刚到这个点、还没提醒过」的那一条，并标记为已提醒。

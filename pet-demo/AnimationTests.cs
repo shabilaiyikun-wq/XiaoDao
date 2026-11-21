@@ -1,4 +1,5 @@
 using System;
+using System.Windows;
 using System.Windows.Media.Media3D;
 
 namespace WinIsland
@@ -6,9 +7,11 @@ namespace WinIsland
     static class AnimationTests
     {
         static int failures;
+        static int checks;
 
         static void Check(bool condition, string name)
         {
+            checks++;
             Console.WriteLine((condition ? "PASS " : "FAIL ") + name);
             if (!condition) failures++;
         }
@@ -129,6 +132,15 @@ namespace WinIsland
             EyeGeometryTests();
             HoldTests();
             ReferenceClipsLoad();
+            ReactionTests();
+            JumpImpulseTests();
+            HappyArchTests();
+            HoverPoseTests();
+            BindingPoolTests();
+            /* 总计行。以前这里只靠退出码表达成败，人肉看日志数不出「到底跑了多少条」，
+               也看不出某一段是否整段没执行（正是 LiquidProbe 那种假绿的形状）。 */
+            Console.WriteLine("RESULT pass=" + (checks - failures) + " fail=" + failures
+                              + " total=" + checks);
             return failures == 0 ? 0 : 1;
         }
 
@@ -538,7 +550,12 @@ namespace WinIsland
             bool poolMoves = false;
             double maxBridgeJump = 0.0;
             PetFrame prev = left.Frame;
-            for (int i = 0; i < 240; i++)
+            /* 900 步 = 15s，**必须跨过整整一段**：片段最长 5.8s（idle-sleepy），
+               而 idle-rest 有 4.8s、整段只有 ±0.006 的呼吸。以前这里只跑 240 步（4s），
+               一旦松手后抽中的是这种安静片段，「在动」就量不到 —— 那条断言当时能过，
+               靠的是 34 段洗牌恰好抽中活泼片段，属于运气。
+               改成跨段之后，它量的是「池子回来了并且会动」，与抽到哪一段无关。 */
+            for (int i = 0; i < 900; i++)
             {
                 left.Advance(Step);
                 PetFrame now = left.Frame;
@@ -546,7 +563,9 @@ namespace WinIsland
                             + Math.Abs(now.Zoom - prev.Zoom)
                             + Math.Abs(now.OffsetY - prev.OffsetY)
                             + Math.Abs(now.Yaw - prev.Yaw);
-                if (jump > maxBridgeJump) maxBridgeJump = jump;
+                /* 单帧步进只在前 240 步量：那是「刚松手」的桥接段。
+                   拉长到 15s 会把后续每次换片也纳进来，阈值就不再是同一件事了。 */
+                if (i < 240 && jump > maxBridgeJump) maxBridgeJump = jump;
                 double drift = Math.Abs(now.SquashY - atHold.SquashY)
                              + Math.Abs(now.Zoom - atHold.Zoom)
                              + Math.Abs(now.OffsetY - atHold.OffsetY)
@@ -571,6 +590,447 @@ namespace WinIsland
             Check(Math.Abs(twice.Frame.SquashY - before.SquashY) < 1e-9
                   && twice.Frame.State == "hold",
                   "holding twice is idempotent");
+        }
+
+        /* 事件 → 反应：配方表与裁决器（desktop/PetReaction.cs）。
+           这一组全是纯逻辑，不开窗、不等真实事件 —— 微信来消息和二十分钟番茄钟
+           都没法在测试里等，但「消息风暴只反应一次」「低优先级不打断高优先级」
+           这些规则必须能在这里被证明。 */
+        static void ReactionTests()
+        {
+            /* 1) 每个已接线事件都有配方，拼错的事件名不许静默当成功 */
+            string[] events = PetReactions.Events();
+            Check(events.Length == 11, "eleven pet reactions are wired (got " + events.Length + ")");
+            for (int i = 0; i < events.Length; i++)
+                Check(PetReactions.Get(events[i]) != null,
+                      "reaction table has a recipe for " + events[i]);
+            Check(PetReactions.Get("no.such.event") == null,
+                  "unknown event has no recipe (so it can be logged, not silently played)");
+            Check(PetReactions.Get(null) == null, "null event is rejected");
+
+            /* 2) 每个事件的配方要对得上约定：状态、脉冲、优先级次序 */
+            PetReaction notify = PetReactions.Get("notify");
+            Check(notify.State == "curious" && !notify.Spin && !notify.Poke,
+                  "notify -> curious short look, no impulse");
+
+            PetReaction timer = PetReactions.Get("timer.done");
+            Check(timer.State == "happy" && timer.Spin && !timer.Poke,
+                  "timer.done -> happy plus one spin (the celebration)");
+
+            PetReaction todo = PetReactions.Get("todo.due");
+            Check(todo.State == "thinking" && !todo.Spin && !todo.Poke,
+                  "todo.due -> thinking");
+
+            PetReaction drop = PetReactions.Get("transfer.drop");
+            Check(drop.Poke && (drop.State == null || drop.State.Length == 0),
+                  "transfer.drop -> squeeze only, no state change");
+
+            /* 戳桌宠：必须是最灵敏的那个 —— 冷却短、不占保护期、不改状态，
+               这样连戳不会把正在播的反应顶掉，也不会看起来像卡住。 */
+            PetReaction poke = PetReactions.Get("pet.poke");
+            Check(poke.Poke && (poke.State == null || poke.State.Length == 0),
+                  "pet.poke -> squeeze only, no state change");
+            Check(poke.CooldownMs > 0 && poke.CooldownMs <= 300,
+                  "pet.poke cooldown is short enough to feel immediate, long enough to stop double-fire");
+            Check(poke.HoldMs == 0, "pet.poke does not hold the pet (nothing to fall back from)");
+
+            /* 第二轮加的六个（A 组） */
+            PetReaction done = PetReactions.Get("todo.done");
+            Check(done.State == "happy" && done.Spin && done.Jump && done.HoldMs > 0,
+                  "todo.done -> happy plus jump and spin (the real celebration)");
+            Check(!timer.Jump, "timer.done spins but does not jump (only 收工 is a leap)");
+            Check(done.Priority < timer.Priority,
+                  "todo.done yields to timer.done when both land together");
+
+            PetReaction add = PetReactions.Get("todo.add");
+            Check(add.State == "thinking" && !add.Spin && !add.Poke, "todo.add -> thinking");
+
+            PetReaction leave = PetReactions.Get("island.leave");
+            Check(leave.State == "sleepy", "island.leave -> sleepy");
+            Check(leave.CooldownMs >= 10000,
+                  "island.leave cooldown is long: the cursor crosses the island constantly");
+
+            PetReaction menu = PetReactions.Get("menu.open");
+            Check(menu.State == "curious", "menu.open -> curious (look at the menu)");
+
+            PetReaction drag = PetReactions.Get("island.drag");
+            Check(drag.State == "dizzy", "island.drag -> dizzy");
+
+            PetReaction scene = PetReactions.Get("scene.change");
+            Check(scene.State == "curious" && scene.Priority <= 15,
+                  "scene.change is low priority (the auto state machine rewrites scenes)");
+
+            /* 被绑定用到的状态名必须都能查到片段。拼错的话 ForState 会静默回落到
+               idle 池，表现是「绑了个不存在的动作」，很难查 —— 这里直接点名。
+               另外这些状态都不能是 idle：把 idle 绑成反应等于没有反应。 */
+            string[] boundStates = PetReactions.BoundStates();
+            Check(boundStates.Length > 0, "bindings declare their states");
+            for (int i = 0; i < boundStates.Length; i++)
+            {
+                PetClip[] cs = PetClips.ForState(boundStates[i]);
+                bool ok = cs != null && cs.Length > 0;
+                if (ok) for (int j = 0; j < cs.Length; j++) if (cs[j] == null) ok = false;
+                Check(ok, "bound state '" + boundStates[i] + "' resolves to real clips");
+                Check(boundStates[i] != "idle", "bound state '" + boundStates[i] + "' is not idle");
+            }
+
+            Check(timer.Priority > todo.Priority && todo.Priority > notify.Priority,
+                  "priority order is timer.done > todo.due > notify");
+            Check(notify.CooldownMs >= 2000,
+                  "notify cooldown is long enough to absorb a burst of messages");
+            Check(timer.HoldMs > 0 && todo.HoldMs > 0,
+                  "state-changing reactions carry a hold time so they can fall back to idle");
+
+            /* 3) 冷却：同一事件在冷却期内只过第一次 */
+            PetReactionPolicy p = new PetReactionPolicy();
+            Check(p.Accept(notify, 0), "first notify plays");
+            Check(!p.Accept(notify, notify.CooldownMs - 1), "notify inside cooldown is dropped");
+            Check(p.Accept(notify, notify.CooldownMs), "notify plays again exactly at cooldown");
+
+            /* 4) 优先级抢占：番茄钟在保护期内，来消息和待办都得让路 */
+            PetReactionPolicy q = new PetReactionPolicy();
+            Check(q.Accept(timer, 0), "timer.done plays");
+            Check(q.Busy(timer.HoldMs - 1), "policy reports busy while holding");
+            Check(!q.Accept(notify, 100), "low priority notify cannot interrupt the celebration");
+            Check(!q.Accept(todo, 100), "todo.due cannot interrupt the celebration either");
+
+            /* 到期那一拍必须已经放开 —— 注意要在「接受 todo」之前问，
+               因为 todo 自己也会占一段保护期，之后再问就只会看到它留下的忙。 */
+            Check(!q.Busy(timer.HoldMs), "policy is free again exactly at the hold deadline");
+            Check(q.Accept(todo, timer.HoldMs), "todo.due plays once the celebration window ends");
+            Check(q.Busy(timer.HoldMs + 1), "the todo reaction arms its own busy window");
+
+            /* 5) 同优先级不互相挡：连着两次收工都该有反应 */
+            PetReactionPolicy r = new PetReactionPolicy();
+            Check(r.Accept(timer, 0), "first celebration plays");
+            Check(r.Accept(timer, timer.CooldownMs),
+                  "a second celebration at its cooldown is not blocked by equal priority");
+
+            /* 6) 纯脉冲事件不占用保护期：挤一下不该把后续状态反应挡掉 */
+            PetReactionPolicy s = new PetReactionPolicy();
+            Check(s.Accept(drop, 0), "transfer.drop plays");
+            Check(s.Accept(todo, 10), "a squeeze does not block the following todo reaction");
+
+            /* 7) 复位后一切从头开始（关掉再打开桌宠不该继承旧的冷却） */
+            PetReactionPolicy t = new PetReactionPolicy();
+            t.Accept(notify, 0);
+            t.Reset();
+            Check(t.Accept(notify, 1), "policy reset clears cooldowns");
+
+            /* 8) 戳桌宠的命中区：圆内中、圆外不中、透明四角不中、直径没算出来时不中。
+                  这块以前没有，所以桌宠整块是穿透的，鼠标直接落到桌面上 —— 根本戳不到。 */
+            Check(PetHit.Circle(100, 100, 100, 100, 60), "pet hit: dead centre hits");
+            Check(PetHit.Circle(129, 100, 100, 100, 60), "pet hit: inside the radius hits");
+            Check(!PetHit.Circle(131, 100, 100, 100, 60), "pet hit: just outside the radius misses");
+            Check(!PetHit.Circle(100 + 25, 100 + 25, 100, 100, 60),
+                  "pet hit: the transparent corner of the bounding box misses (circle, not square)");
+            Check(!PetHit.Circle(100, 100, 100, 100, 0),
+                  "pet hit: no hit before the diameter is known");
+            Check(!PetHit.Circle(0, 0, double.NaN, 100, 60),
+                  "pet hit: a NaN centre never hits (rather than swallowing every click)");
+        }
+
+        /* 跳跃脉冲：比「戳」高得多，而且自己会落回原地。
+
+           为什么要单独测峰值：跳跃和戳走的是同一条 OffsetY 通道，只是曲线不同。
+           如果哪天有人把 52 改成 12，代码不会报错，桌宠只是「跳」得看不出来 ——
+           这种退化只有量数字能发现。 */
+        static void JumpImpulseTests()
+        {
+            const double Step = PetAnimationRuntime.Step;
+
+            /* 先把身体停在静止姿态，拿到干净的基线（OffsetY≈0） */
+            PetAnimationRuntime jump = new PetAnimationRuntime(17);
+            jump.Hold(true);
+            for (int i = 0; i < 60; i++) jump.Advance(Step);
+            double baseY = jump.Frame.OffsetY;
+
+            jump.Jump();
+            double peak = 0;
+            for (int i = 0; i < 90; i++)
+            {
+                jump.Advance(Step);
+                double lift = baseY - jump.Frame.OffsetY;   /* OffsetY 负值向上 */
+                if (lift > peak) peak = lift;
+            }
+            Check(peak > 40,
+                  "jump lifts clearly off the ground (peak " + peak.ToString("0.0") + " px)");
+
+            /* 落地后必须回到基线，而且冲量要自己从队列里消失 —— 否则身体会永久悬空 */
+            for (int i = 0; i < 90; i++) jump.Advance(Step);
+            Check(Math.Abs(jump.Frame.OffsetY - baseY) < 0.5,
+                  "jump lands back on the baseline (offset "
+                  + (jump.Frame.OffsetY - baseY).ToString("0.000") + " px)");
+            Check(Math.Abs(jump.Frame.SquashY - 1) < 0.02,
+                  "jump settles back to an unsquashed body");
+
+            /* 和戳对比：跳跃必须明显更高，否则「加个跳跃」等于没加 */
+            PetAnimationRuntime poke = new PetAnimationRuntime(17);
+            poke.Hold(true);
+            for (int i = 0; i < 60; i++) poke.Advance(Step);
+            double pokeBase = poke.Frame.OffsetY;
+            poke.Poke();
+            double pokePeak = 0;
+            for (int i = 0; i < 90; i++)
+            {
+                poke.Advance(Step);
+                double lift = pokeBase - poke.Frame.OffsetY;
+                if (lift > pokePeak) pokePeak = lift;
+            }
+            Check(pokePeak > 10 && pokePeak < 30,
+                  "poke stays a small nudge (" + pokePeak.ToString("0.0") + " px)");
+            Check(peak > pokePeak * 1.8,
+                  "jump is at least twice the poke (" + peak.ToString("0.0")
+                  + " vs " + pokePeak.ToString("0.0") + " px)");
+        }
+
+        /* 高兴的眼睛是拱桥形（∩）。这件事必须用数字验：
+           这个模型读不了截图（模型不支持图像输入），而且 PetStage 是 Viewport3D，
+           RenderTargetBitmap 根本抓不到球体内容 —— 所以「看起来更像」这种判据
+           在这里无法成立，只能量轮廓。
+
+           量的三件事：
+             1) 拱顶在中间（|X| 接近 0），不是偏到一边；
+             2) 拱顶明显高于两端（差值 ≥ 半个眼高），否则只是「弯了一点」；
+             3) 换形状不改大小（竖直范围仍在原来的胶囊量级内）。 */
+        static void HappyArchTests()
+        {
+            PetEyePose happy = PetFaces.Eye(PetExpression.Happy, -1);
+            Check(Math.Abs(happy.Bend) >= Pet3D.ArchBend,
+                  "happy declares an arch (bend " + happy.Bend.ToString("0.##")
+                  + " >= " + Pet3D.ArchBend.ToString("0.##") + ")");
+
+            System.Collections.Generic.List<Point> b =
+                Pet3D.EyeBoundary(0, 0, happy.Width, happy.Height, 0, happy.Bend);
+            Check(b != null && b.Count >= 16, "happy arch outline has enough points");
+
+            double maxY = double.MinValue, minX = double.MaxValue, maxX = double.MinValue;
+            double peakX = 0;
+            bool finite = true;
+            for (int i = 0; i < b.Count; i++)
+            {
+                if (double.IsNaN(b[i].X) || double.IsNaN(b[i].Y)
+                    || double.IsInfinity(b[i].X) || double.IsInfinity(b[i].Y)) finite = false;
+                if (b[i].Y > maxY) { maxY = b[i].Y; peakX = b[i].X; }
+                if (b[i].X < minX) minX = b[i].X;
+                if (b[i].X > maxX) maxX = b[i].X;
+            }
+            Check(finite, "happy arch outline has no NaN or infinity");
+
+            /* 1) 拱顶在中间 */
+            Check(Math.Abs(peakX) < happy.Width * 0.12,
+                  "arch peaks near the middle (x=" + peakX.ToString("0.000") + ")");
+
+            /* 2) 拱顶明显高于两端。取「靠两端那些点里最高的」当端头高度。
+               幅度按**眼宽**衡量：
+               眼睛只有 4.9 DIP 宽，拱如果只有 1 DIP 高（= 按眼高算的结果），
+               在屏幕上就是一根平线 —— 这正是第一版「还是眯眼」的原因。 */
+            /* 端头 = |X| 取到最外侧（= 半宽）的那两点。注意别写成「|X| > 宽×0.4」：
+               X 的绝对值上限是半宽，那个条件等于 |u| > 0.8，量到的是拱腰而不是端头
+               —— 会把真实拱高 0.110 量成 0.081。 */
+            double endY = double.MinValue;
+            for (int i = 0; i < b.Count; i++)
+                if (Math.Abs(Math.Abs(b[i].X) - maxX) < 1e-9 && b[i].Y > endY) endY = b[i].Y;
+            Check(maxY - endY > happy.Width * 0.30,
+                  "arch rises by a readable fraction of the eye width (rise "
+                  + (maxY - endY).ToString("0.000") + " vs width "
+                  + happy.Width.ToString("0.000") + "; maxY=" + maxY.ToString("0.000")
+                  + " endY=" + endY.ToString("0.000") + " pts=" + b.Count
+                  + " bend=" + happy.Bend.ToString("0.000")
+                  + " maxX=" + maxX.ToString("0.000") + ")");
+
+            /* 3) 换形状可以更高，但不能出框 */
+            Check(Math.Abs(maxX - happy.Width / 2) < 1e-9 && Math.Abs(minX + happy.Width / 2) < 1e-9,
+                  "arch keeps the original eye width");
+            double extent = maxY - (endY - happy.Height * 0.80 * 0.30);
+            Check(extent < happy.Width * 1.0,
+                  "arch stays inside a sane box (extent " + extent.ToString("0.000")
+                  + " vs width " + happy.Width.ToString("0.000") + ")");
+
+            /* 4) 眼睑压下来时拱不能跟着塌。
+               这是第一版真正的 bug：拱高按眼高算，而 Scene 里 Height 会先乘 (1-Lid)，
+               眼一眯拱就没了。按眼宽算之后，Lid 只让拱变细，不该让它变平。 */
+            System.Collections.Generic.List<Point> squinting =
+                Pet3D.EyeBoundary(0, 0, happy.Width, happy.Height * 0.20, 0, happy.Bend);
+            double sMaxY = double.MinValue, sEndY = double.MinValue, sMaxX = 0;
+            for (int i = 0; i < squinting.Count; i++)
+            {
+                if (squinting[i].Y > sMaxY) sMaxY = squinting[i].Y;
+                if (Math.Abs(squinting[i].X) > sMaxX) sMaxX = Math.Abs(squinting[i].X);
+            }
+            for (int i = 0; i < squinting.Count; i++)
+                if (Math.Abs(Math.Abs(squinting[i].X) - sMaxX) < 1e-9 && squinting[i].Y > sEndY)
+                    sEndY = squinting[i].Y;
+            Check(sMaxY - sEndY > happy.Width * 0.30,
+                  "arch does not flatten when the lid squeezes the height (rise "
+                  + (sMaxY - sEndY).ToString("0.000") + ")");
+
+            /* 4) 带真实 tilt 仍然是拱形（旋转不该把拱压平） */
+            PetEyePose right = PetFaces.Eye(PetExpression.Happy, 1);
+            System.Collections.Generic.List<Point> tilted =
+                Pet3D.EyeBoundary(0, 0, right.Width, right.Height, right.Tilt, right.Bend);
+            double tMaxY = double.MinValue, tEndY = double.MinValue;
+            for (int i = 0; i < tilted.Count; i++)
+            {
+                if (tilted[i].Y > tMaxY) tMaxY = tilted[i].Y;
+            }
+            /* 旋转后「端头高度」按 y 的中位附近取：直接用不旋转的端头做参照更稳，
+               这里只验「拱顶仍然在最上面且高于中线」 */
+            Check(tMaxY > right.Height * 0.3,
+                  "tilted arch still rises above the eye midline ("
+                  + tMaxY.ToString("0.000") + ")");
+
+            /* 5) 其他表情一个像素都没变：它们的 bend 都低于阈值，仍走胶囊 */
+            PetExpression[] others = new PetExpression[] {
+                PetExpression.Neutral, PetExpression.Surprised, PetExpression.Sleepy,
+                PetExpression.Focused, PetExpression.Sad, PetExpression.Angry,
+                PetExpression.Curious, PetExpression.Wink, PetExpression.Calm };
+            int changed = 0;
+            string changedNames = "";
+            for (int i = 0; i < others.Length; i++)
+            {
+                PetEyePose p = PetFaces.Eye(others[i], -1);
+                if (Math.Abs(p.Bend) >= Pet3D.ArchBend) { changed++; changedNames += " " + others[i]; }
+            }
+            Check(changed == 0, "only happy arches; other expressions keep the capsule"
+                  + changedNames);
+
+            /* 6) 胶囊那条分支本身没坏：Neutral 的轮廓仍是「高一半、宽一半」 */
+            PetEyePose neutral = PetFaces.Eye(PetExpression.Neutral, -1);
+            System.Collections.Generic.List<Point> capsule =
+                Pet3D.EyeBoundary(0, 0, neutral.Width, neutral.Height, 0, neutral.Bend);
+            double cMaxY = double.MinValue, cMaxX = double.MinValue;
+            for (int i = 0; i < capsule.Count; i++)
+            {
+                if (capsule[i].Y > cMaxY) cMaxY = capsule[i].Y;
+                if (Math.Abs(capsule[i].X) > cMaxX) cMaxX = Math.Abs(capsule[i].X);
+            }
+            Check(Math.Abs(cMaxY - neutral.Height / 2) < 1e-9,
+                  "neutral outline is still a capsule (half height "
+                  + cMaxY.ToString("0.000") + ")");
+            Check(Math.Abs(cMaxX - neutral.Width / 2) < 1e-9,
+                  "neutral outline is still a capsule (half width "
+                  + cMaxX.ToString("0.000") + ")");
+
+            /* 7) 端到端：轮廓对了，还要确认**网格真的吃到了 bend**。
+               轮廓函数正确但 EyePatch 忘了传参时，上面所有断言依然全绿 ——
+               这条比的是两条真实渲染路径产出的顶点数：拱形带 30 个轮廓点、
+               胶囊 26 个，扇形细分相同，所以顶点数必然不同。 */
+            MeshGeometry3D archMesh = Pet3D.EyeMesh(0, 0, happy.Width, happy.Height, 0, happy.Bend);
+            MeshGeometry3D capsuleMesh = Pet3D.EyeMesh(0, 0, happy.Width, happy.Height, 0, 0);
+            Check(archMesh != null && capsuleMesh != null
+                  && archMesh.Positions.Count != capsuleMesh.Positions.Count,
+                  "the eye mesh really receives the bend ("
+                  + (archMesh == null ? -1 : archMesh.Positions.Count) + " vs "
+                  + (capsuleMesh == null ? -1 : capsuleMesh.Positions.Count) + " vertices)");
+        }
+
+        /* 鼠标停在球上：低头 + 眯眼 + 左右摇头。
+           这三样在数据里是三条独立通道，所以能分别断言 —— 而不是只能靠肉眼看截图：
+             Pitch 低头（正 = 往下，见 PetClip.Sample）
+             Lid   眯眼（Pet3D 里眼睛高度 *= 1-Lid）
+             Yaw   左右摇头（必须变号，否则是「歪着头」不是「摇头」） */
+        static void HoverPoseTests()
+        {
+            PetClip[] pool = PetClips.ForState("hover");
+            Check(pool != null && pool.Length == 1 && pool[0] != null,
+                  "hover state maps to exactly one clip");
+            PetClip c = pool[0];
+            Check(c.Name == "hover-shy", "hover clip is named hover-shy");
+            Check(c.Duration >= 2, "hover clip lasts long enough to read as a loop");
+
+            /* 低头：整段都要低着头（不是点一下头又抬起来） */
+            double minPitch = double.MaxValue;
+            for (double s = 0.3; s <= c.Duration - 0.4; s += 0.1)
+            {
+                PetFrame f = c.Sample(s);
+                if (f.Pitch < minPitch) minPitch = f.Pitch;
+            }
+            Check(minPitch > 0.1,
+                  "hover holds its head down (min pitch " + minPitch.ToString("0.000") + " rad)");
+
+            /* 眯眼：中段压到一半，且不能压成闭眼 */
+            PetFrame mid = c.Sample(c.Duration * 0.5);
+            Check(mid.Lid > 0.45 && mid.Lid < 0.7,
+                  "hover squints: eyes about half height (lid " + mid.Lid.ToString("0.00") + ")");
+            Check(c.Sample(0).Lid < 0.3,
+                  "hover starts with eyes open, so entering it is not a pop");
+
+            /* 摇头：一段里必须同时出现明显的左和右 */
+            double maxYaw = 0, minYaw = 0;
+            for (double s = 0; s <= c.Duration; s += 0.02)
+            {
+                PetFrame f = c.Sample(s);
+                if (f.Yaw > maxYaw) maxYaw = f.Yaw;
+                if (f.Yaw < minYaw) minYaw = f.Yaw;
+            }
+            Check(maxYaw > 0.15 && minYaw < -0.15,
+                  "hover shakes head both ways (yaw " + minYaw.ToString("0.00")
+                  + " .. " + maxYaw.ToString("0.00") + " rad)");
+
+            /* 首尾回到中位：换回 idle 时不会看到脑袋「啪」地弹正 */
+            PetFrame first = c.Sample(0), last = c.Sample(c.Duration);
+            Check(Math.Abs(first.Yaw) < 0.02 && Math.Abs(last.Yaw) < 0.02,
+                  "hover starts and ends facing forward (no snap back to idle)");
+
+            /* 它只能被 hover 用，不能混进随机待机池 —— 否则平时发呆也会摇头 */
+            bool leaked = false;
+            for (int i = 0; i < PetClips.Idle.Length; i++)
+                if (PetClips.Idle[i] != null && PetClips.Idle[i].Name == "hover-shy") leaked = true;
+            Check(!leaked, "hover clip is not part of the random idle pool");
+        }
+
+        static bool PoolHas(string name)
+        {
+            for (int i = 0; i < PetClips.Idle.Length; i++)
+                if (PetClips.Idle[i] != null && PetClips.Idle[i].Name == name) return true;
+            return false;
+        }
+
+        /* 「被绑定的动作必须移出随机动画池」——这条规则的守门测试。
+
+           为什么值得专门锁住：一个片段一旦既表示「某事发生了」又在待机里随机出现，
+           它的信号含义就废了（看到 Done 你分不清它是在庆祝还是路过）。
+           排除名单是从绑定表**推导**的（PetClips.BuildIdlePool →
+           ReservedClipNames → PetReactions.BoundStates），所以这里要验的是
+           推导结果本身：绑了什么，池子里就必须没有什么。 */
+        static void BindingPoolTests()
+        {
+            string[] reserved = PetClips.ReservedClipNames();
+            Check(Array.IndexOf(reserved, "Blocked_A") >= 0,
+                  "reserved list keeps the hand-picked exclusion Blocked_A");
+
+            /* 方向一：凡是绑定状态用到的片段，一个都不许在池子里 */
+            string[] bound = PetReactions.BoundStates();
+            int leaked = 0;
+            string leakedNames = "";
+            for (int s = 0; s < bound.Length; s++)
+            {
+                PetClip[] cs = PetClips.ForState(bound[s]);
+                if (cs == null) continue;
+                for (int i = 0; i < cs.Length; i++)
+                {
+                    if (cs[i] == null) continue;
+                    if (PoolHas(cs[i].Name))
+                    {
+                        leaked++;
+                        leakedNames += " " + cs[i].Name + "(" + bound[s] + ")";
+                    }
+                }
+            }
+            Check(leaked == 0, "no bound clip leaks into the random idle pool" + leakedNames);
+
+            /* 方向二：排除必须是精确的，不能把整族一刀切掉 ——
+               没被绑定用到的参考动画应该还在池子里。 */
+            Check(PoolHas("Marketing_A") && PoolHas("Streaming_A") && PoolHas("Idle_A"),
+                  "unbound reference clips stay in the idle pool");
+            Check(PoolHas("idle-rest"),
+                  "the self-authored idle clips stay in the pool");
+
+            /* 方向三：排完之后池子还得够厚，否则待机看起来会重复 */
+            Check(PetClips.Idle.Length >= 15,
+                  "idle pool still has enough variety after exclusions ("
+                  + PetClips.Idle.Length + " clips)");
         }
     }
 }

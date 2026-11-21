@@ -18,13 +18,30 @@ namespace WinIsland
     {
         const int Seg = 26;   // 每个角的分段数
         public const double N = 4.0;
+        const double CapsuleN = 2.0;
+
+        /// <summary>第一、二层用胶囊端帽，展开态仍用原超椭圆；过渡区平滑恢复。</summary>
+        public static double IslandExponent(double h)
+        {
+            double start = Scenes.PlayH;
+            const double end = 60.0;
+            if (h <= start) return CapsuleN;
+            if (h >= end) return N;
+            return CapsuleN + (N - CapsuleN) * (h - start) / (end - start);
+        }
 
         public static StreamGeometry Build(double w, double h, double r)
+        {
+            return Build(w, h, r, N);
+        }
+
+        public static StreamGeometry Build(double w, double h, double r, double exponent)
         {
             if (w <= 0) w = 1;
             if (h <= 0) h = 1;
             if (r > w / 2) r = w / 2;
             if (r > h / 2) r = h / 2;
+            if (exponent < CapsuleN) exponent = CapsuleN;
 
             StreamGeometry g = new StreamGeometry();
             using (StreamGeometryContext c = g.Open())
@@ -41,33 +58,39 @@ namespace WinIsland
 
                 c.BeginFigure(new Point(r, 0), true, true);
                 c.LineTo(new Point(w - r, 0), true, false);
-                Arc(c, w - r, r, r, 270, 360);      // 右上
+                Arc(c, w - r, r, r, 270, 360, exponent);      // 右上
                 c.LineTo(new Point(w, h - r), true, false);
-                Arc(c, w - r, h - r, r, 0, 90);     // 右下
+                Arc(c, w - r, h - r, r, 0, 90, exponent);     // 右下
                 c.LineTo(new Point(r, h), true, false);
-                Arc(c, r, h - r, r, 90, 180);       // 左下
+                Arc(c, r, h - r, r, 90, 180, exponent);       // 左下
                 c.LineTo(new Point(0, r), true, false);
-                Arc(c, r, r, r, 180, 270);          // 左上，回到起点
+                Arc(c, r, r, r, 180, 270, exponent);          // 左上，回到起点
             }
             g.Freeze();
             return g;
         }
 
-        static void Arc(StreamGeometryContext c, double cx, double cy, double r, double from, double to)
+        static void Arc(StreamGeometryContext c, double cx, double cy, double r,
+                        double from, double to, double exponent)
         {
             for (int i = 1; i <= Seg; i++)
             {
                 double t = (from + (to - from) * i / Seg) * Math.PI / 180.0;
                 double ct = Math.Cos(t);
                 double st = Math.Sin(t);
-                double x = cx + r * Math.Sign(ct) * Math.Pow(Math.Abs(ct), 2.0 / N);
-                double y = cy + r * Math.Sign(st) * Math.Pow(Math.Abs(st), 2.0 / N);
+                double x = cx + r * Math.Sign(ct) * Math.Pow(Math.Abs(ct), 2.0 / exponent);
+                double y = cy + r * Math.Sign(st) * Math.Pow(Math.Abs(st), 2.0 / exponent);
                 c.LineTo(new Point(x, y), true, false);
             }
         }
 
         /// <summary>点是否在超椭圆内（用于点击穿透的命中判定）。</summary>
         public static bool Contains(Point p, double w, double h, double r)
+        {
+            return Contains(p, w, h, r, N);
+        }
+
+        public static bool Contains(Point p, double w, double h, double r, double exponent)
         {
             if (p.X < 0 || p.Y < 0 || p.X > w || p.Y > h) return false;
             if (r > w / 2) r = w / 2;
@@ -82,7 +105,8 @@ namespace WinIsland
 
             double u = Math.Abs(dx) / r;
             double v = Math.Abs(dy) / r;
-            return Math.Pow(u, N) + Math.Pow(v, N) <= 1.0;
+            if (exponent < CapsuleN) exponent = CapsuleN;
+            return Math.Pow(u, exponent) + Math.Pow(v, exponent) <= 1.0;
         }
     }
 

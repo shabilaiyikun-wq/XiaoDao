@@ -32,6 +32,28 @@ namespace WinIsland
         [DllImport("user32.dll")]
         static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+        /* 「真的要退出」用的两把锤子。
+
+           为什么需要：Environment.Exit 并不是立刻死 —— 它先跑 ProcessExit 处理器，
+           再走 ExitProcess 的 DLL detach。这个程序挂着 OLE 拖放、COM 媒体会话
+           （GlobalSystemMediaTransportControls）、UIA 通知这些第三方组件，
+           任何一个在 detach 里卡住，进程就会永远停在退出路上。
+           实测到过：调用 Environment.Exit 之后进程还活着 6 秒以上。
+
+           TerminateProcess(自己, code) 是内核级终止，不会执行任何清理，
+           因此不会卡。它是最后一道，只在优雅退出已经失败时才用。 */
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll")]
+        static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+        /// <summary>立刻终止本进程（不跑清理、不可能被卡住）。失败返回 false。</summary>
+        public static bool TerminateSelf(int exitCode)
+        {
+            try { return TerminateProcess(GetCurrentProcess(), (uint)exitCode); }
+            catch { return false; }
+        }
+
         public static IntPtr GetExStyle(IntPtr hwnd)
         {
             return GetWindowLongPtrW(hwnd, GWL_EXSTYLE);

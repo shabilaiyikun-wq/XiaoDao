@@ -14,6 +14,61 @@ namespace WinIsland
         public double TimerTotal = 25 * 60;
         public bool TimerRunning;
 
+        /* ---------------------------------------------------------------- 天气 */
+
+        /* 字段名用 Wx 而不是 Weather：Weather 是个静态类，同名字段会在 Snap
+           的作用域里把它遮住 —— 以后谁在这儿写一行 Weather.Describe() 就会
+           莫名其妙编不过，而且报错信息还指不到根上。 */
+        public WeatherNow Wx = new WeatherNow();
+
+        public bool WxHas { get { return Wx.Has; } }
+
+        /// <summary>大字号那个温度。没数据就是 --°，不假装 0°。</summary>
+        public string WxTempText { get { return Wx.Has ? Wx.TempText : "--°"; } }
+
+        public string WxDesc
+        {
+            get
+            {
+                if (Wx.Has) return Wx.Describe;
+                return Wx.Error.Length > 0 ? Wx.Error : "还没取到天气";
+            }
+        }
+
+        /// <summary>城市名。定位中 / 没数据时给一句站得住的话，不留空。</summary>
+        public string WxPlace
+        {
+            get
+            {
+                if (Wx.Has) return Wx.Place.Length > 0 ? Wx.Place : "当地";
+                return "定位中";
+            }
+        }
+
+        /// <summary>城市下面那行小字：省·国，或者「自动定位」/「指定」。 </summary>
+        public string WxWhere
+        {
+            get
+            {
+                if (!Wx.Has) return "右键菜单里可以指定城市";
+                string tag = Wx.Auto ? "自动定位" : "指定城市";
+                if (Wx.Region.Length > 0) return Wx.Region + " · " + tag;
+                return tag;
+            }
+        }
+
+        /// <summary>数据新鲜度：卡片右下角那句。</summary>
+        public string WxAge
+        {
+            get
+            {
+                if (!Wx.Has) return "等待首次更新";
+                string s = Weather.AgeText(Wx.At);
+                if (Wx.Stale) s = "离线 · " + s;
+                return s;
+            }
+        }
+
         /* ---------------------------------------------------------------- 媒体 */
         public bool MediaHas { get { return Media.Has; } }
         public bool Playing { get { return Media.Playing; } }
@@ -111,5 +166,9 @@ namespace WinIsland
 
         /* 底部指示点：直接跳到某个场景 */
         public Action<string> Scene;
+
+        /* --- 天气 --- */
+        public Action RefreshWeather;   // 立刻重抓一次（尊重最短间隔）
+        public Action PickCity;         // 打开输入窗填城市
     }
 }

@@ -103,6 +103,12 @@ namespace WinIsland
             Trace("spin command");
         }
 
+        public void Jump()
+        {
+            _stage.Jump();
+            Trace("jump command");
+        }
+
         public void SetState(string state) { _stage.SetState(state); }
         public void PlayClip(string clip) { _stage.PlayClip(clip); }
 

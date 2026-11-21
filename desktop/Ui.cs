@@ -216,7 +216,7 @@ namespace WinIsland
             b.Padding = new Thickness(padX, 0, padX, 0);
             b.CornerRadius = new CornerRadius(h * 0.30);
             b.Background = primary ? Br(art.AccOn) : Br(Look.A(Hex(look.BtnBg), (double)look.BtnBg.A / 255.0));
-            TextBlock t = Text(label, 12.5, FontWeights.SemiBold,
+            TextBlock t = Text(label, 13, FontWeights.SemiBold,
                 primary ? Colors.White : look.Ink1, false);
             t.VerticalAlignment = VerticalAlignment.Center;
             b.Child = t;

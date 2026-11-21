@@ -33,6 +33,11 @@ namespace WinIsland
         public Action AddFromClipboard;
         public Action Quit;
 
+        /* 天气：城市是「填一个名字」而不是从固定列表里选，
+           所以这两个动作和别的 Action<string> 不一样，没有参数。 */
+        public Action WeatherCity;
+        public Action RefreshWeather;
+
         /* 桌宠。启用/关闭是一个动作而不是两个 —— 菜单项自己知道当前态，
            点下去就是取反，和「允许截图与录屏捕捉」一致。 */
         public Action TogglePet;
@@ -282,7 +287,7 @@ namespace WinIsland
             m.BorderBrush = new SolidColorBrush(line);
             m.Foreground = new SolidColorBrush(look.Ink1);
             m.FontFamily = new FontFamily(Ui.FontUi);
-            m.FontSize = 12.5;
+            m.FontSize = 13;
             m.HasDropShadow = false;
             m.Placement = PlacementMode.MousePoint;
 
@@ -291,12 +296,22 @@ namespace WinIsland
                 delegate { act.Scene("media"); }));
             scenes.Items.Add(Leaf("倒计时", item, scene == "timer",
                 delegate { act.Scene("timer"); }));
+            scenes.Items.Add(Leaf("天气", item, scene == "weather",
+                delegate { act.Scene("weather"); }));
             scenes.Items.Add(Leaf("剪贴板", item, scene == "clip",
                 delegate { act.Scene("clip"); }));
             scenes.Items.Add(Leaf("待办", item, scene == "todo",
                 delegate { act.Scene("todo"); }));
             scenes.Items.Add(Leaf("中转站", item, scene == "transfer",
                 delegate { act.Scene("transfer"); }));
+
+            /* 天气。城市直接手填 —— 这台机器挂着代理，IP 定位会给出加州，
+               所以「指定城市」不是高级选项，是日常操作。 */
+            MenuItem wx = Sub("天气", item);
+            wx.Items.Add(Leaf("指定城市…", item, false,
+                delegate { act.WeatherCity(); }));
+            wx.Items.Add(Leaf("立刻刷新", item, false,
+                delegate { act.RefreshWeather(); }));
 
             MenuItem looks = Sub("外观", item);
             looks.Items.Add(Leaf("Glass", item, lookKey == "glass",
@@ -448,7 +463,7 @@ namespace WinIsland
             m.BorderBrush = new SolidColorBrush(line);
             m.Foreground = new SolidColorBrush(look.Ink1);
             m.FontFamily = new FontFamily(Ui.FontUi);
-            m.FontSize = 12.5;
+            m.FontSize = 13;
             m.HasDropShadow = false;
             m.Placement = PlacementMode.MousePoint;
 

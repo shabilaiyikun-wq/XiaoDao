@@ -14,13 +14,19 @@ namespace WinIsland
         public Color BtnBg;
         public Color BtnHover;
         public Color TileBg;
+        /* 待办纸片的实心灰条。**不带 alpha**：这些颜色是给「实心」用的，
+           和上面那些半透明层不是一个用途，混用会让纸片看起来像一块磨砂玻璃
+           而不是一张纸。取值要和各自的 Tint 拉开：深色外观里比底色亮一档，
+           frost 里比底色暗一档，否则条和面板糊在一起。 */
+        public Color CardBg;
+        public Color CardEdge;       /* 相邻两条之间的 1px 缝 */
         public Color TintTop;
         public Color TintMid;
         public Color TintBottom;
         public bool Refract;         // 真实采样桌面
-        public Color RefractWash;    // 压在采样之上的冷色/暗色
+        public Color RefractWash;    // 玻璃底色上的冷色/暗色
 
-        /* 玻璃边缘折射（只有 glass 那套给非零值，其余外观全 0 = 一个像素都不变）。
+        /* 玻璃边缘折射参数（当前 glass 外观也关闭；如恢复，只有该外观设置非零值）。
            三项都按 DIP 记，换分辨率不用改数值：
              Bend      折射带宽度（从岛边往里多少 DIP 还在弯折背景）
              BendKick  位移强度（岛边处的最大位移 = 一半）
@@ -46,6 +52,8 @@ namespace WinIsland
             l.BtnBg = A("#FFFFFF", 0.10);
             l.BtnHover = A("#FFFFFF", 0.17);
             l.TileBg = A("#FFFFFF", 0.09);
+            l.CardBg = C("#3A3D46");
+            l.CardEdge = C("#4B4F5B");
             l.TintTop = C("#1C1E26");
             l.TintMid = C("#16181F");
             l.TintBottom = C("#101116");
@@ -66,6 +74,10 @@ namespace WinIsland
             l.TintTop = C("#2B2F3B");
             l.TintMid = C("#22252F");
             l.TintBottom = C("#171922");
+            /* graphite 的底色比 obsidian 亮一档，灰条跟着抬一档，
+               否则条和面板之间只剩一点点差别 */
+            l.CardBg = C("#4A4E5A");
+            l.CardEdge = C("#5C6170");
             l.Grain = 0.060;
             l.Edge = 1.0;
             l.ShadowAlpha = 0.55;
@@ -83,6 +95,9 @@ namespace WinIsland
             l.BtnBg = A("#14161D", 0.06);
             l.BtnHover = A("#14161D", 0.12);
             l.TileBg = A("#14161D", 0.07);
+            /* frost 是浅色外观：灰条要比面板暗，字是深色的，压在灰条上才清楚 */
+            l.CardBg = C("#CDD1DB");
+            l.CardEdge = C("#B7BCC8");
             l.TintTop = C("#FFFFFF");
             l.TintMid = C("#F7F8FB");
             l.TintBottom = C("#EEF0F5");
@@ -107,21 +122,20 @@ namespace WinIsland
             l.BtnBg = A("#FFFFFF", 0.14);
             l.BtnHover = A("#FFFFFF", 0.22);
             l.TileBg = A("#FFFFFF", 0.13);
+            /* glass 的实际底色随壁纸变，但 RefractWash 压了 44% 的 #0E1016，
+               所以按深色处理 */
+            l.CardBg = C("#41454F");
+            l.CardEdge = C("#535866");
             l.TintTop = A("#FFFFFF", 0.16);
             l.TintMid = A("#FFFFFF", 0.04);
             l.TintBottom = A("#000000", 0.14);
-            l.Refract = true;
+            l.Refract = false;
             l.RefractWash = A("#0E1016", 0.44);
-            /* 折射参数按岛体实际尺寸定：展开态 452x206，半高 103 ——
-               26 DIP 的带子约占高度的 1/8，视觉上正好是「一圈厚玻璃」，
-               再宽就从边缘效果变成整个岛都在变形了。
-               21 DIP 的位移强度 = 岛边最多把背景拉进来 10.5 DIP，
-               比基底那条 16 DIP 的模糊半径略小，弯折看得出来但不会错位。
-               2.6 DIP 的色散在这个尺寸上是「仔细看才有」的色边，
-               照着参考仓库默认 cab=2（CSS px）量级给。 */
-            l.Bend = 26;
-            l.BendKick = 21;
-            l.BendSplit = 2.6;
+            /* Disable screen refraction: layered-window capture leaves a visible
+               rectangular seam in the glass surface. Keep the translucent tint. */
+            l.Bend = 0;
+            l.BendKick = 0;
+            l.BendSplit = 0;
             l.Grain = 0.050;
             l.Edge = 1.0;
             l.Spec = 1.0;

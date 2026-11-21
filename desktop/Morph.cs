@@ -487,13 +487,17 @@ namespace WinIsland
         /// </summary>
         public static PetPose Sample(double t, double fadeSec, double runSec,
                                      double islandW, double islandH, double ix, double iy,
-                                     double windowW, double d1, double d2, double gap)
+                                     double windowW, double d1, double d2, double gap,
+                                     double dockInset = 0)
         {
             PetPose p = new PetPose();
 
             double w = Math.Max(2, islandW);
             double h = Math.Max(2, islandH);
-            double dockCx = ix + w / 2;
+            /* 停在岛内哪一格。默认是岛心（没天气时的样子）；
+               岛变宽去显示天气时，球位挪到左边，桌宠得跟着挪到那一格，
+               否则它压在正中、把右边的温度挤没。 */
+            double dockCx = dockInset > 0 ? ix + dockInset + d1 / 2 : ix + w / 2;
             double dockCy = iy + h / 2;
 
             /* 停靠点：岛旁，**优先左边**。

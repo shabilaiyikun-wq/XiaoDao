@@ -63,6 +63,7 @@ static class MorphTests
     {
         Console.WriteLine("== morph-tests ==");
         BodyConstants();
+        CornerShapes();
         LayerSwitching();
         RapidReverse();
         FaceCrossFade();
@@ -186,6 +187,26 @@ static class MorphTests
         Check(Math.Abs(zOpen - 0.759) < 0.01 && Math.Abs(zClose - 0.792) < 0.01,
               "damping ratios unchanged",
               "open=" + Math.Round(zOpen, 3) + " collapse=" + Math.Round(zClose, 3));
+    }
+
+    /* 第一、二层改为胶囊端帽，展开的第三层保留原超椭圆轮廓。 */
+    static void CornerShapes()
+    {
+        Console.WriteLine("-- corner shapes --");
+        double idleR = Scenes.IdleH / 2;
+        double playR = Scenes.PlayH / 2;
+        Point idleCorner = new Point(idleR * 0.25, idleR * 0.25);
+        Point playCorner = new Point(playR * 0.25, playR * 0.25);
+        Point expandedCorner = new Point(30 * 0.25, 30 * 0.25);
+
+        Check(!Squircle.Build(Scenes.IdleW, Scenes.IdleH, idleR,
+                              Squircle.IslandExponent(Scenes.IdleH)).FillContains(idleCorner),
+              "idle has capsule end caps", "corner sample must fall outside the circular cap");
+        Check(!Squircle.Build(Scenes.PlayW, Scenes.PlayH, playR,
+                              Squircle.IslandExponent(Scenes.PlayH)).FillContains(playCorner),
+              "play has capsule end caps", "corner sample must fall outside the circular cap");
+        Check(Squircle.Build(452, 206, 30, Squircle.IslandExponent(206)).FillContains(expandedCorner),
+              "expanded keeps original squircle", "corner sample remains inside the superellipse");
     }
 
     /* 1. 层级切换 */
@@ -554,6 +575,22 @@ static class MorphTests
               "t0 in dock", "dia=" + N(p0.Dia) + " op=" + N(p0.Opacity));
         Check(Math.Abs(p0.Cx - (ix + iw / 2)) < 1e-9 && Math.Abs(p0.Cy - (iy + ih / 2)) < 1e-9,
               "t0 at island centre", N(p0.Cx) + "," + N(p0.Cy));
+
+        /* 有天气时第一层是「球在左、温度在右」：岛变宽到 82，
+           桌宠必须停在左槽而不是岛心，否则它压在正中、右边的温度就被盖掉。
+           左槽球心 = 岛左边 + 内边距 + 半径。 */
+        double iwWx = 82, dockInset = 6;
+        PetPose pd = PetLink.Sample(0, fade, run, iwWx, ih, ix, iy, winW, d1, d2, gap, dockInset);
+        double wantDockCx = ix + dockInset + d1 / 2;
+        Check(Math.Abs(pd.Cx - wantDockCx) < 1e-9,
+              "dock shifts left for weather", N(pd.Cx) + " want " + N(wantDockCx));
+        Check(pd.Cx < ix + iwWx / 2 - 1,
+              "dock left of island centre", N(pd.Cx) + " centre=" + N(ix + iwWx / 2));
+
+        /* 不传 inset 时必须还是岛心 —— 旧调用点一个字都不用改 */
+        PetPose pc = PetLink.Sample(0, fade, run, iwWx, ih, ix, iy, winW, d1, d2, gap);
+        Check(Math.Abs(pc.Cx - (ix + iwWx / 2)) < 1e-9,
+              "no inset keeps centre", N(pc.Cx));
 
         /* 交接点：直径与球心必须连续（换槽位那一帧不许跳） */
         PetPose before = PetLink.Sample(fade - 1e-6, fade, run, iw, ih, ix, iy, winW, d1, d2, gap);

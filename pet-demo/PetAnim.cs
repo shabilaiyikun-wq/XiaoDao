@@ -89,8 +89,9 @@ namespace WinIsland
             if(selected==null)throw new ArgumentException("Unknown reference clip: "+name,"name");
             state=name;clips=new PetClip[]{selected};bag=null;previous=-1;NextClip();
         }
-        public void Poke(){AddImpulse(false);} public void Spin(){AddImpulse(true);}
-        void AddImpulse(bool spin){if(impulses.Count>=8)impulses.RemoveAt(0);PetImpulse p=new PetImpulse();p.Spin=spin;impulses.Add(p);}
+        public void Poke(){AddImpulse(PetImpulse.KindPoke);} public void Spin(){AddImpulse(PetImpulse.KindSpin);}
+        public void Jump(){AddImpulse(PetImpulse.KindJump);}
+        void AddImpulse(int kind){if(impulses.Count>=8)impulses.RemoveAt(0);PetImpulse p=new PetImpulse();p.Kind=kind;impulses.Add(p);}
         void NextClip()
         {
             if(bag==null||bagIndex>=bag.Length){bag=random.Shuffle(clips.Length,previous);bagIndex=0;}
@@ -176,8 +177,13 @@ namespace WinIsland
             {
                 PetImpulse p=impulses[i];p.Age+=Step;
                 if(p.Age>=p.Duration){impulses.RemoveAt(i);continue;}
-                p.Apply(ref f);wanted=p.Spin?PetExpression.Happy:PetExpression.Surprised;
-                f.State=p.Spin?"spin":"poked";impulses[i]=p;
+                p.Apply(ref f);
+                wanted = p.Kind==PetImpulse.KindSpin ? PetExpression.Happy
+                       : p.Kind==PetImpulse.KindJump ? PetExpression.Happy
+                       : PetExpression.Surprised;
+                f.State = p.Kind==PetImpulse.KindSpin ? "spin"
+                        : p.Kind==PetImpulse.KindJump ? "jump" : "poked";
+                impulses[i]=p;
             }
             /* 指针注视混合。放在冲量之后、表情混合之前：冲量改的是旋转/缩放，
                不碰视线，所以两者互不覆盖；表情混合只读 Expression。 */

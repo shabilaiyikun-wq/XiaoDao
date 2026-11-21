@@ -73,6 +73,8 @@ rem still prints [ok]. Keep the whole argument list comment-free.
   /r:"%WPF%\PresentationFramework.dll" ^
   /r:"%WPF%\PresentationCore.dll" ^
   /r:"%WPF%\WindowsBase.dll" ^
+  /r:"%WPF%\UIAutomationClient.dll" ^
+  /r:"%WPF%\UIAutomationTypes.dll" ^
   /r:"%FW%\System.Xaml.dll" ^
   /r:"%FW%\System.Core.dll" ^
   /r:"%FW%\System.Drawing.dll" ^
@@ -82,6 +84,8 @@ rem still prints [ok]. Keep the whole argument list comment-free.
   /r:"%WINMD%\Windows.Foundation.winmd" ^
   /r:"%WINMD%\Windows.Media.winmd" ^
   /r:"%WINMD%\Windows.Storage.winmd" ^
+  /resource:"assets\wechat-notify.png",WinIsland.wechat-notify.png ^
+  /resource:"assets\qq-notify.png",WinIsland.qq-notify.png ^
   /resource:"%PET%\grok-clips.json",WinIsland.grok-clips.json ^
   Native.cs ^
   Squircle.cs ^
@@ -92,10 +96,13 @@ rem still prints [ok]. Keep the whole argument list comment-free.
   Glass.cs ^
   Ui.cs ^
   Data.cs ^
+  Tower.cs ^
+  TodoTower.cs ^
   Layout.cs ^
   Menu.cs ^
   Media.cs ^
   Lyric.cs ^
+  Weather.cs ^
   Store.cs ^
   Transfer.cs ^
   Notify.cs ^
@@ -115,6 +122,7 @@ rem still prints [ok]. Keep the whole argument list comment-free.
   "%PET%\PetStage.cs" ^
   "%PET%\Pet.cs" ^
   PetController.cs ^
+  PetReaction.cs ^
   IslandWindow.cs ^
   PetIsland.cs ^
   Program.cs

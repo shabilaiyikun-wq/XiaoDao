@@ -74,7 +74,7 @@ namespace WinIsland
             panel.BorderThickness = new Thickness(1);
             Ui.At(root, panel, 0, 0);
 
-            TextBlock hint = Ui.Text("写一条待办，回车确认", 11.5, FontWeights.Normal,
+            TextBlock hint = Ui.Text("写一条待办，回车确认", 12, FontWeights.Normal,
                 Color.FromArgb(0x8C, 0xFF, 0xFF, 0xFF), false);
             Ui.At(root, hint, 20, 12);
 
@@ -168,7 +168,7 @@ namespace WinIsland
             b.BorderThickness = new Thickness(1);
             b.BorderBrush = Ui.Br(Color.FromArgb(first ? (byte)0xFF : (byte)0x22,
                 (byte)0x8A, (byte)0xB4, (byte)0xF8));
-            TextBlock t = Ui.Text(label, 11.5, FontWeights.Medium,
+            TextBlock t = Ui.Text(label, 12, FontWeights.Medium,
                 Color.FromArgb(0xD0, 0xFF, 0xFF, 0xFF), false);
             t.HorizontalAlignment = HorizontalAlignment.Center;
             t.VerticalAlignment = VerticalAlignment.Center;
@@ -196,6 +196,140 @@ namespace WinIsland
                 due = (int)Math.Max(1, Math.Round((t - DateTime.Now).TotalMinutes));
             }
             if (_onDone != null) _onDone(text, due);
+            Close();
+        }
+
+        void Close()
+        {
+            if (_win == null) return;
+            Window w = _win;
+            _win = null;
+            try { w.Close(); } catch { }
+            if (Current == this) Current = null;
+        }
+    }
+
+    /* ---------------------------------------------------------------- 填城市
+
+       和 TodoInput 同一套做法（贴岛下方的浮层 + Enter 提交 + Esc 取消），
+       只是没有那一排时间 chip。为什么单独写一个而不是给 TodoInput 加个模式：
+       这两个窗的回调签名不一样（(string,int) 对 (string)），
+       硬合成一个会多出一堆没人用的分支。 */
+
+    class CityInput
+    {
+        public static CityInput Current;
+
+        Window _win;
+        TextBox _box;
+        Action<string> _onDone;
+
+        public bool IsOpen { get { return _win != null && _win.IsVisible; } }
+
+        public static void Open(Window owner, Rect islandScreen, Look look, Art art,
+                                string initial, Action<string> onDone)
+        {
+            if (Current != null && Current.IsOpen) { Current.Focus(); return; }
+
+            CityInput c = new CityInput();
+            c.Build(owner, islandScreen, look, art, initial, onDone);
+            Current = c;
+        }
+
+        void Build(Window owner, Rect r, Look look, Art art, string initial, Action<string> onDone)
+        {
+            _onDone = onDone;
+
+            double w = Math.Max(360, r.Width);
+            double h = 96;
+
+            _win = new Window();
+            _win.WindowStyle = WindowStyle.None;
+            _win.AllowsTransparency = true;
+            _win.Background = Brushes.Transparent;
+            _win.ShowInTaskbar = false;
+            _win.Topmost = true;
+            _win.ResizeMode = ResizeMode.NoResize;
+            _win.Width = w;
+            _win.Height = h;
+            _win.WindowStartupLocation = WindowStartupLocation.Manual;
+            _win.Left = r.Left;
+            _win.Top = r.Top + r.Height + 10;
+            _win.ShowActivated = true;
+
+            Canvas root = new Canvas();
+            root.Width = w;
+            root.Height = h;
+
+            Border panel = new Border();
+            panel.Width = w;
+            panel.Height = h;
+            panel.CornerRadius = new CornerRadius(18);
+            panel.Background = Ui.Br(Color.FromArgb(0xF2, 0x14, 0x16, 0x1A));
+            panel.BorderBrush = Ui.Br(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+            panel.BorderThickness = new Thickness(1);
+            Ui.At(root, panel, 0, 0);
+
+            TextBlock hint = Ui.Text("城市名，中英文都行；留空 = 按网络出口自动定位",
+                12, FontWeights.Normal, Color.FromArgb(0x8C, 0xFF, 0xFF, 0xFF), false);
+            Ui.At(root, hint, 20, 12);
+
+            _box = new TextBox();
+            _box.Width = w - 40;
+            _box.FontSize = 15;
+            _box.FontFamily = new FontFamily(Ui.FontUi);
+            _box.Foreground = Brushes.White;
+            _box.CaretBrush = Brushes.White;
+            _box.Background = Brushes.Transparent;
+            _box.BorderThickness = new Thickness(0);
+            _box.Padding = new Thickness(0, 4, 0, 4);
+            _box.MaxLength = 40;
+            _box.AcceptsReturn = false;
+            _box.Text = initial == null ? "" : initial;
+            Ui.At(root, _box, 20, 32);
+
+            Rectangle line = new Rectangle();
+            line.Width = w - 40;
+            line.Height = 1;
+            line.Fill = Ui.Br(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
+            Ui.At(root, line, 20, 62);
+
+            TextBlock foot = Ui.Text("回车确认  ·  Esc 取消", 11, FontWeights.Normal,
+                Color.FromArgb(0x6E, 0xFF, 0xFF, 0xFF), false);
+            Ui.At(root, foot, 20, 70);
+
+            _win.Content = root;
+
+            _box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.Key == Key.Enter) { Commit(); e.Handled = true; }
+                else if (e.Key == Key.Escape) { Close(); e.Handled = true; }
+            };
+            _win.Deactivated += delegate { Close(); };
+            _win.Loaded += delegate
+            {
+                _box.Focus();
+                Keyboard.Focus(_box);
+                _box.SelectAll();
+            };
+
+            _win.Show();
+            _win.Activate();
+            _box.Focus();
+        }
+
+        void Focus()
+        {
+            if (_win == null) return;
+            _win.Activate();
+            if (_box != null) _box.Focus();
+        }
+
+        void Commit()
+        {
+            string text = _box.Text == null ? "" : _box.Text.Trim();
+            /* 空字符串是合法的：它的意思就是「清掉手填的城市，回到自动定位」 */
+            if (_onDone != null) _onDone(text);
             Close();
         }
 

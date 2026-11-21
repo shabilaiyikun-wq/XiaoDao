@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows.Automation;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
@@ -159,7 +160,29 @@ namespace WinIsland
            绑到岛的主窗上会和它自己的消息处理混在一起（穿透样式那些改扩展样式的
            操作也在收消息）。这里单独建一个 HWND_MESSAGE 消息窗，互不干扰。 */
         const int HWND_MESSAGE = -3;
-        const int HSHELL_FLASH_MASK = 6;
+
+        /* HSHELL_FLASH = 0x8006，而 HSHELL_REDRAW = 0x0006 —— 两者只差最高位。
+           按低 15 位比较会把两者折叠成一个值（0x8006 & 0x7FFF == 0x0006），
+           所以这里必须整值比较、分开处理。两个都是**真的**信号，不能只留一个。
+
+           ## 为什么 REDRAW 必须收（这条踩过一次，别再删）
+
+           上一轮把判定收紧成「只认 0x8006」，理由是 REDRAW 会让改标题也亮球。
+           结果微信来消息的提醒**整个消失了**：微信 4.x 全程不调
+           FlashWindowEx，它把「有未读」这件事反映成托盘/标题的重画 ——
+           也就是 HSHELL_REDRAW，而不是 HSHELL_FLASH。只认 FLASH 等于把微信
+           这一路彻底掐断（QQ 反而两个都可能给）。
+
+           所以两个都收，但按可信度分级，见 ShellProc。 */
+        const int HSHELL_FLASH = 0x8006;
+        const int HSHELL_REDRAW = 0x0006;
+
+        /* REDRAW 的冷却单独一档，比 FLASH 的 2500ms 长得多。
+
+           实测（work/shellhook-probe.exe，本机 70s）：QQ 音乐换曲时它的
+           TXGuiFoundation 托盘窗在 40ms 内连打 4 发 REDRAW。也就是说 REDRAW
+           天然会成串出现，两秒的去抖挡不住「一首歌亮一次球」这种误报。 */
+        const int RedrawCooldownMs = 20000;
 
         static HwndSource _hook;
         static int _shellMsg;
@@ -204,10 +227,10 @@ namespace WinIsland
         {
             if (msg != _shellMsg) return IntPtr.Zero;
 
-            /* 低 15 位是比较用的：不同来源对 HSHELL_FLASH 给的是 0x8006 还是 6
-               并不一致，按低 15 位比能同时接住两种。 */
-            int code = wParam.ToInt32() & 0x7FFF;
-            if (code != HSHELL_FLASH_MASK) return IntPtr.Zero;
+            int code = wParam.ToInt32();
+            bool flash = code == HSHELL_FLASH;
+            bool redraw = code == HSHELL_REDRAW;
+            if (!flash && !redraw) return IntPtr.Zero;
 
             IntPtr target = lParam;
             if (target == IntPtr.Zero) return IntPtr.Zero;
@@ -221,8 +244,78 @@ namespace WinIsland
             App app;
             if (!_pidApp.TryGetValue(pid, out app)) return IntPtr.Zero;
 
-            Fire(app, "shell flash pid=" + pid);
+            if (flash)
+            {
+                /* 应用明确「请求注意」：可信度最高，直接报。 */
+                LogShellEvent(app, code, "", "accepted (flash)");
+                Fire(app, "shell flash pid=" + pid);
+                return IntPtr.Zero;
+            }
+
+            /* ---- 以下是 REDRAW：微信唯一给的信号，但它也是噪声的主要来源 ---- */
+
+            StringBuilder cb = new StringBuilder(256);
+            GetClassNameW(target, cb, 256);
+            string cls = cb.ToString();
+
+            /* 注意：这里**不能**用 IsNoise。那张表是给「窗口出现」那条路用的，
+               里面包含 Qt51514WxTrayIconMessageWindowClass —— 而微信「有未读」
+               恰恰就是这个托盘窗在重画。拿 IsNoise 挡红画等于把信号又掐一次。
+               红画只排真正会高频重画的输入法/文本服务窗。 */
+            if (IsChatty(cls)) return IntPtr.Zero;
+
+            /* 0x0 的窗口重画不携带任何信息 */
+            RECT rr;
+            if (GetWindowRect(target, out rr))
+            {
+                if (rr.R - rr.L <= 0 && rr.B - rr.T <= 0) return IntPtr.Zero;
+            }
+
+            /* 你正看着这个应用的时候不用提醒你 —— 这一条就能挡掉绝大部分
+               「在微信里打字、标题跟着变」引起的 REDRAW。 */
+            if (ForegroundIs(app)) return IntPtr.Zero;
+
+            LogShellEvent(app, code, cls, "accepted");
+            FireRedraw(app, "shell redraw pid=" + pid + " cls='" + cls + "'");
             return IntPtr.Zero;
+        }
+
+        /* 真正吵的只有文本服务那一类：焦点一动就重画，和消息毫无关系。 */
+        static readonly string[] ChattyClasses = new string[] {
+            "IME",
+            "MSCTFIME UI"
+        };
+
+        static bool IsChatty(string cls)
+        {
+            for (int i = 0; i < ChattyClasses.Length; i++)
+                if (ChattyClasses[i] == cls) return true;
+            return false;
+        }
+
+        /* 上一次打「收到什么 shell 事件」的时间。限速是为了不把日志冲掉：
+           每发只值一行，且只在排查「为什么不亮」时才需要。 */
+        static DateTime _lastEventLog = DateTime.MinValue;
+
+        static void LogShellEvent(App app, int code, string cls, string verdict)
+        {
+            DateTime now = DateTime.UtcNow;
+            if ((now - _lastEventLog).TotalMilliseconds < 3000) return;
+            _lastEventLog = now;
+            Log("notify shell event 0x" + code.ToString("X4") + " " + app
+                + " cls='" + cls + "' -> " + verdict);
+        }
+
+        /* 前台窗口是不是这个应用自己的。跨进程查询，只在红画事件上走一次，
+           不在 400ms 轮询路径上。 */
+        static bool ForegroundIs(App app)
+        {
+            IntPtr fg = GetForegroundWindow();
+            if (fg == IntPtr.Zero) return false;
+            uint pid;
+            GetWindowThreadProcessId(fg, out pid);
+            App a;
+            return _pidApp.TryGetValue(pid, out a) && a == app;
         }
 
         public static void Stop()
@@ -298,6 +391,36 @@ namespace WinIsland
             if (app == App.WeChat) _firedWx = now; else _firedQq = now;
 
             Log("notify " + app + " ARRIVED: " + why);
+            if (Arrived != null)
+            {
+                try { Arrived(app); }
+                catch (Exception ex) { Log("notify handler failed: " + ex.Message); }
+            }
+        }
+
+        /* REDRAW 那一档。除了自己那档长冷却，还要**同时**更新 FLASH 的去抖时间戳，
+           否则「红画亮一颗 → 2.5 秒后真的 FLASH 又亮一颗」会连亮两下。 */
+        static DateTime _redrawWx = DateTime.MinValue;
+        static DateTime _redrawQq = DateTime.MinValue;
+
+        static void FireRedraw(App app, string why)
+        {
+            DateTime now = DateTime.UtcNow;
+            DateTime last = app == App.WeChat ? _redrawWx : _redrawQq;
+            long age = (long)(now - last).TotalMilliseconds;
+            if (age < RedrawCooldownMs)
+            {
+                /* 冷却期内的红画不写日志：一首歌 4 发，全写会把有用的行冲掉 */
+                return;
+            }
+
+            DateTime lastFire = app == App.WeChat ? _firedWx : _firedQq;
+            if ((now - lastFire).TotalMilliseconds < DebounceMs) return;
+
+            if (app == App.WeChat) { _redrawWx = now; _firedWx = now; }
+            else { _redrawQq = now; _firedQq = now; }
+
+            Log("notify " + app + " ARRIVED (redraw, cooldown " + RedrawCooldownMs + "ms): " + why);
             if (Arrived != null)
             {
                 try { Arrived(app); }
@@ -431,69 +554,330 @@ static void ActivateCore(App app)
     IntPtr hwnd = FindMainWindow(app);
     long tFind = sw.ElapsedMilliseconds;
 
+    int wasIconic = 0, wasVisible = 0;
     bool focused = false;
-    if (hwnd != IntPtr.Zero) focused = BringToFront(hwnd);
+    if (hwnd != IntPtr.Zero)
+    {
+        /* 记录调用前的真实状态：卡死投诉里最能区分的两个量就是它俩 */
+        wasIconic = IsIconic(hwnd) ? 1 : 0;
+        wasVisible = IsWindowVisible(hwnd) ? 1 : 0;
+        focused = BringToFront(hwnd, app);
+    }
+    else if (app == App.WeChat)
+    {
+        focused = TryWakeFromTray();
+    }
     long tFront = sw.ElapsedMilliseconds;
+
+    /* 激活之后目标还答不答消息 —— 这就是"卡死"的可观测定义。
+       打进日志，下次再出问题不用靠回忆。 */
+    int hung = 0;
+    if (hwnd != IntPtr.Zero && IsHungAppWindow(hwnd)) hung = 1;
 
     /* 找不到能激活的窗口就到此为止。绝不 Process.Start —— 见坑二。 */
     Log("notify activate " + app
         + " focused=" + (focused ? 1 : 0)
+        + " wasIconic=" + wasIconic
+        + " wasVisible=" + wasVisible
+        + " hwnd=0x" + hwnd.ToInt64().ToString("X")
+        + (hung == 1 ? " TARGET-HUNG" : "")
         + " pids=" + tPids + "ms"
         + " find=" + (tFind - tPids) + "ms"
         + " front=" + (tFront - tFind) + "ms"
         + " total=" + sw.ElapsedMilliseconds + "ms");
 }
 
-static bool BringToFront(IntPtr hwnd)
+/* 等某个窗口状态真的成立。返回它是否成立过。 */
+static bool WaitFor(IntPtr hwnd, Func<IntPtr, bool> pred, int budgetMs)
 {
+    int spent = 0;
+    while (spent < budgetMs)
+    {
+        if (pred(hwnd)) return true;
+        System.Threading.Thread.Sleep(20);
+        spent += 20;
+    }
+    return pred(hwnd);
+}
+
+static bool BringToFront(IntPtr hwnd, App app)
+{
+    /* ---- 坑四（最容易把人坑死的一条）：AttachThreadInput 不能挂到目标自己身上 ----
+
+       旧代码先 `ShowWindow(SW_SHOW)`、**之后**才取 `GetForegroundWindow()`。
+       而 SW_SHOW 本身就会把目标变成前台窗口 —— 于是取到的"当前前台"就是目标
+       自己，`AttachThreadInput` 把自己的线程挂到了**目标的 UI 线程**上。
+
+       这一步没有任何好处（借用前台权利的意图是"借用别人的"，不是借用自己的），
+       却把目标的输入队列（焦点/键盘状态/鼠标捕获/活动窗口）和一个**不泵消息**
+       的线程池线程共享了。挂着的这段时间里目标应用的输入处理要靠本线程配合；
+       一旦解挂慢了、失败了，或者本线程被 CLR 回收去跑别的事，目标就**假死**。
+       表现就是："点球把微信叫出来，微信界面卡死"。
+
+       所以前台窗口必须在**任何 ShowWindow 之前**取，并且要排除目标自己的线程。 */
+    IntPtr fgBefore = GetForegroundWindow();
     uint fgThread = 0;
-    bool attached = false;
+    bool fgIsSelf = false;
+
+    if (fgBefore != IntPtr.Zero && fgBefore != hwnd)
+    {
+        uint fgPid;
+        uint t = GetWindowThreadProcessId(fgBefore, out fgPid);
+        App other;
+
+        /* 前台本来就是目标应用（可见的另一张窗）→ 借它没意义，反而自己咬自己 */
+        bool sameApp = _pidApp.TryGetValue(fgPid, out other) && other == app;
+
+        /* 前台是**我们自己**（用户刚点过岛，岛成了前台）→ 同样绝不能挂。
+           `_pidApp` 里只有微信/QQ 的 pid，查不到自己，所以必须单独判一次；
+           否则线程池线程会挂到岛的 UI 线程上，把岛自己的输入队列一起拖死。 */
+        fgIsSelf = (fgPid == (uint)System.Diagnostics.Process.GetCurrentProcess().Id);
+
+        if (!sameApp && !fgIsSelf) fgThread = t;
+    }
+
     try
     {
-        /* 缩在 -32000 的是最小化，SW_RESTORE 能拉回来 */
-        ShowWindow(hwnd, SW_RESTORE);
-        ShowWindow(hwnd, SW_SHOW);
+        if (!IsWindowVisible(hwnd))
+        {
+            Log("notify bring-to-front: refusing hidden window 0x" + hwnd.ToInt64().ToString("X"));
+            return false;
+        }
 
-        IntPtr fg = GetForegroundWindow();
-        fgThread = fg == IntPtr.Zero ? 0 : GetWindowThreadProcessId(fg, out _fgPid);
-        uint me = GetCurrentThreadId();
+        /* 只还原真正最小化的窗口；托盘隐藏由系统托盘按钮负责唤起。 */
+        if (IsIconic(hwnd))
+        {
+            ShowWindowAsync(hwnd, SW_RESTORE);
+            if (!WaitFor(hwnd, delegate(IntPtr h) { return !IsIconic(h); }, 900))
+            {
+                Log("notify bring-to-front: minimized window did not restore");
+                return false;
+            }
+        }
 
-        if (fgThread != 0 && fgThread != me)
-            attached = AttachThreadInput(me, fgThread, true);
+        /* ---- 先直接试，绝大多数情况下到这就结束了 ----
 
-        return SetForegroundWindow(hwnd);
+           用户在岛上刚点过鼠标，本进程拿得到前台权利。走这条路时我们
+           **完全不碰任何人的输入队列**，也就不可能拖住别人。 */
+        if (SetForegroundWindow(hwnd)) return true;
+
+        /* ---- 只有被前台锁挡住，才退到「借用前台线程权利」这一步 ----
+
+           这一步是唯一能拖垮别人输入队列的操作，所以门槛卡到最严：
+             · 目标是应用自己的线程 → 不挂（见坑四）
+             · 目标是我们自己的进程   → 不挂（挂自己咬自己，会拖死岛）
+             · 消息队列只在真要挂之前才建，挂完立刻解开 */
+        bool attached = false;
+        try
+        {
+            uint me = GetCurrentThreadId();
+            if (fgThread != 0 && fgThread != me)
+            {
+                /* AttachThreadInput 要求调用线程有消息队列。线程池线程默认没有，
+                   在没队列的线程上挂接行为未定义，所以先建出队列。 */
+                MSG dummy;
+                PeekMessageW(out dummy, IntPtr.Zero, 0, 0, PM_NOREMOVE);
+
+                attached = AttachThreadInput(me, fgThread, true);
+                if (attached)
+                    Log("notify bring-to-front: input attach fallback, fg thread=" + fgThread);
+            }
+            return SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            /* 解挂必须无条件执行。输入队列一旦挂上没解开，两个线程的输入处理
+               就永久绑在一起 —— 那本身就是另一种"卡死"。 */
+            if (attached)
+            {
+                try { AttachThreadInput(GetCurrentThreadId(), fgThread, false); }
+                catch { }
+            }
+        }
     }
     catch (Exception ex)
     {
         Log("notify bring-to-front failed: " + ex.Message);
         return false;
     }
-    finally
+}
+
+static bool IsWechatTrayName(string name)
+{
+    if (String.IsNullOrWhiteSpace(name)) return false;
+    string value = name.Trim();
+    if (value.StartsWith("微信输入法", StringComparison.Ordinal)) return false;
+    return value.StartsWith("微信", StringComparison.Ordinal)
+        || value.StartsWith("WeChat", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("Weixin", StringComparison.OrdinalIgnoreCase);
+}
+
+static List<AutomationElement> FindWechatTrayButtons(AutomationElement root, bool taskbarRoot)
+{
+    List<AutomationElement> targets = new List<AutomationElement>();
+    if (root == null) return targets;
+
+    AutomationElementCollection items = root.FindAll(TreeScope.Descendants,
+        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+    for (int i = 0; i < items.Count; i++)
     {
-        /* 解挂必须无条件执行。输入队列一旦挂上没解开，本线程的输入处理就和对方
-           线程永久绑在一起 —— 那本身就是另一种"卡死"。旧代码只在正常路径解挂。 */
-        if (attached)
+        try
         {
-            try { AttachThreadInput(GetCurrentThreadId(), fgThread, false); }
-            catch { }
+            AutomationElement item = items[i];
+            AutomationElement.AutomationElementInformation info = item.Current;
+            if (!info.IsEnabled || info.IsOffscreen || !IsWechatTrayName(info.Name)) continue;
+            if (taskbarRoot && info.ClassName != "SystemTray.NormalButton") continue;
+
+            System.Windows.Rect bounds = info.BoundingRectangle;
+            if (bounds.Width <= 0 || bounds.Height <= 0 || bounds.Width > 200 || bounds.Height > 200) continue;
+
+            object pattern;
+            if (!item.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) continue;
+
+            bool duplicate = false;
+            for (int j = 0; j < targets.Count; j++)
+            {
+                AutomationElement.AutomationElementInformation previous = targets[j].Current;
+                if (previous.Name == info.Name && previous.BoundingRectangle == bounds)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) targets.Add(item);
         }
+        catch { }
+    }
+    return targets;
+}
+
+static bool TryInvokeUniqueWechatButton(List<AutomationElement> targets, string location)
+{
+    if (targets.Count != 1)
+    {
+        if (targets.Count > 1) Log("notify tray wake: ambiguous 微信 buttons in " + location);
+        return false;
+    }
+
+    try
+    {
+        object pattern;
+        if (!targets[0].TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) return false;
+        ((InvokePattern)pattern).Invoke();
+        Log("notify tray wake: invoked unique 微信 button in " + location);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Log("notify tray wake: invoke failed: " + ex.Message);
+        return false;
     }
 }
 
-/* GetWindowThreadProcessId 的 out 参数需要一个真实变量（C# 5 不能内联声明），
-   这里的 pid 用不上，只借它拿线程 id。 */
-static uint _fgPid;
+static bool TryOpenOverflow(IntPtr taskbar, AutomationElement taskbarElement)
+{
+    IntPtr tray = FindWindowExW(taskbar, IntPtr.Zero, "TrayNotifyWnd", IntPtr.Zero);
+    IntPtr legacyButton = tray == IntPtr.Zero ? IntPtr.Zero
+        : FindWindowExW(tray, IntPtr.Zero, "Button", IntPtr.Zero);
+    if (legacyButton != IntPtr.Zero)
+    {
+        try
+        {
+            AutomationElement button = AutomationElement.FromHandle(legacyButton);
+            object pattern;
+            if (button.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+            {
+                ((InvokePattern)pattern).Invoke();
+                return true;
+            }
+        }
+        catch { }
+    }
 
-/* 主窗口不能按「面积最大」挑。
+    if (taskbarElement == null) return false;
+    AutomationElementCollection buttons = taskbarElement.FindAll(TreeScope.Descendants,
+        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+    List<AutomationElement> toggles = new List<AutomationElement>();
+    for (int i = 0; i < buttons.Count; i++)
+    {
+        try
+        {
+            AutomationElement item = buttons[i];
+            AutomationElement.AutomationElementInformation info = item.Current;
+            string label = (info.Name ?? "").ToLowerInvariant();
+            bool isOverflow = info.AutomationId == "SystemTrayIcon"
+                && (label.Contains("hidden") || label.Contains("隐藏") || label.Contains("隠れて"));
+            if (!info.IsEnabled || info.IsOffscreen || !isOverflow) continue;
+            object pattern;
+            if (item.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) toggles.Add(item);
+        }
+        catch { }
+    }
+    return TryInvokeUniqueWechatButton(toggles, "the overflow toggle");
+}
 
-   实测两个陷阱：微信那个 1920x1117 的 `Qt51514WxTrayIconMessageWindowClass`
-   托盘 helper 比主窗大得多，而且**是隐藏的**；WeChatAppEx 常驻的
-   `Chrome_WidgetWin_0` 也是 1280x745 隐藏窗。旧代码只比面积，于是拿隐藏窗去
-   `SetForegroundWindow`，必然失败。
+static bool TryWakeFromTray()
+{
+    try
+    {
+        IntPtr taskbar = FindWindowW("Shell_TrayWnd", IntPtr.Zero);
+        if (taskbar == IntPtr.Zero) return false;
+        AutomationElement taskbarElement = AutomationElement.FromHandle(taskbar);
+        IntPtr tray = FindWindowExW(taskbar, IntPtr.Zero, "TrayNotifyWnd", IntPtr.Zero);
 
-   现在的顺序：
-     1) 标题精确匹配（最小化时面积判据完全失效，只有标题靠得住）；
-     2) 兜底只接受**可见**、非噪声类、非零尺寸、不在 -32000 的窗口。 */
+        List<AutomationElement> targets = new List<AutomationElement>();
+        AddTrayTargets(targets, FindWechatTrayButtons(taskbarElement, true));
+        if (tray != IntPtr.Zero)
+            AddTrayTargets(targets, FindWechatTrayButtons(AutomationElement.FromHandle(tray), false));
+        if (TryInvokeUniqueWechatButton(targets, "the visible taskbar tray")) return true;
+        if (targets.Count > 1) return false;
+
+        if (!TryOpenOverflow(taskbar, taskbarElement))
+        {
+            Log("notify tray wake: could not open the hidden-icons area");
+            return false;
+        }
+
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            System.Threading.Thread.Sleep(80);
+            IntPtr overflow = FindWindowW("TopLevelWindowForOverflowXamlIsland", IntPtr.Zero);
+            if (overflow == IntPtr.Zero) overflow = FindWindowW("NotifyIconOverflowWindow", IntPtr.Zero);
+            if (overflow == IntPtr.Zero || !IsWindowVisible(overflow)) continue;
+
+            targets = FindWechatTrayButtons(AutomationElement.FromHandle(overflow), false);
+            if (TryInvokeUniqueWechatButton(targets, "the hidden-icons area")) return true;
+            if (targets.Count > 1) return false;
+        }
+    }
+    catch (Exception ex)
+    {
+        Log("notify tray wake failed: " + ex.Message);
+    }
+    return false;
+}
+
+static void AddTrayTargets(List<AutomationElement> target, List<AutomationElement> source)
+{
+    for (int i = 0; i < source.Count; i++)
+    {
+        bool duplicate = false;
+        AutomationElement.AutomationElementInformation current = source[i].Current;
+        for (int j = 0; j < target.Count; j++)
+        {
+            AutomationElement.AutomationElementInformation existing = target[j].Current;
+            if (existing.Name == current.Name && existing.BoundingRectangle == current.BoundingRectangle)
+            {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) target.Add(source[i]);
+    }
+}
+
+/* 微信只接受可见且标题精确匹配的主窗；托盘隐藏时交给系统托盘按钮唤起。
+   QQ 保留可见窗口的面积兜底。 */
 static IntPtr FindMainWindow(App app)
 {
     IntPtr byTitle = IntPtr.Zero;
@@ -507,6 +891,7 @@ static IntPtr FindMainWindow(App app)
         GetWindowThreadProcessId(h, out pid);
         App a;
         if (!map.TryGetValue(pid, out a) || a != app) return true;
+        if (!IsWindowVisible(h)) return true;
 
         /* 噪声类先排掉，顺带省一次跨进程的 GetWindowTextW */
         StringBuilder cb = new StringBuilder(256);
@@ -525,11 +910,10 @@ static IntPtr FindMainWindow(App app)
 
         bool isMainTitle = (app == App.WeChat && title == "微信")
                         || (app == App.QQ && title == "QQ");
-        /* 标题命中就直接定下来：主窗最小化时只有 237x39，面积比不过隐藏 helper */
+        /* 标题命中就直接定下来：最小化窗口仍可见，托盘隐藏窗口已在上方排除。 */
         if (isMainTitle && byTitle == IntPtr.Zero) { byTitle = h; return true; }
 
-        /* 兜底必须是用户真的看得见、能激活的窗口 */
-        if (!IsWindowVisible(h)) return true;
+        /* 兜底只接受用户真的看得见、能激活的窗口 */
         if (r.L <= -30000 || r.T <= -30000) return true;
 
         long area = (long)w * (long)hh;
@@ -538,6 +922,7 @@ static IntPtr FindMainWindow(App app)
     }, IntPtr.Zero);
 
     if (byTitle != IntPtr.Zero) return byTitle;
+    if (app == App.WeChat) return IntPtr.Zero;
     return byArea;
 }        /* 找该应用「最大的那个可见窗口」当主窗。藏到离屏的也算，
            因为 ShowWindow(SW_RESTORE) 能把位置拉回来。 */
@@ -567,10 +952,44 @@ static IntPtr FindMainWindow(App app)
         /* ---------------------------------------------------------------- Win32 */
 
         const int SW_RESTORE = 9;
-        const int SW_SHOW = 5;
+
+        /* PeekMessageW 的 PM_NOREMOVE：只为了让本线程建出输入队列，
+           不取走任何消息。AttachThreadInput 之前必须做。 */
+        const uint PM_NOREMOVE = 0;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public int x;
+            public int y;
+            public uint lPrivate;
+        }
+
+        [DllImport("user32.dll")]
+        static extern bool PeekMessageW(out MSG m, IntPtr hwnd, uint min, uint max, uint remove);
+
+        [DllImport("user32.dll")]
+        static extern bool IsIconic(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        static extern bool IsHungAppWindow(IntPtr hwnd);
 
         [StructLayout(LayoutKind.Sequential)]
         struct RECT { public int L, T, R, B; }
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindowAsync(IntPtr hwnd, int cmd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr FindWindowW(string className, IntPtr windowName);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr FindWindowExW(IntPtr parent, IntPtr childAfter, string className, IntPtr windowName);
 
         delegate bool EnumProc(IntPtr hwnd, IntPtr lparam);
 
@@ -591,9 +1010,6 @@ static IntPtr FindMainWindow(App app)
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern int GetWindowTextW(IntPtr hwnd, StringBuilder sb, int max);
-
-        [DllImport("user32.dll")]
-        static extern bool ShowWindow(IntPtr hwnd, int cmd);
 
         [DllImport("user32.dll")]
         static extern bool SetForegroundWindow(IntPtr hwnd);

@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 namespace WinIsland
 {
@@ -142,6 +143,23 @@ namespace WinIsland
         double IslandPetDockDiameter
         {
             get { return Layout.IdleOrbSize(Scenes.IdleW, Scenes.IdleH); }
+        }
+
+        /* 桌宠停在岛内时的球心要往左偏多少。
+
+           没天气时是 0 —— 停在岛心，和以前完全一样。
+           有天气时第一层变成「球在左、温度在右」，桌宠就是那颗球，
+           必须跟着挪到左槽（Layout.IdleWeatherPadX 是同一格的内边距），
+           否则它压在正中，右边的温度看着就像没画出来。 */
+        double PetDockInset
+        {
+            get
+            {
+                if (_state != "idle") return 0;
+                if (!_snap.WxHas) return 0;
+                if (IslandW <= Scenes.IdleW + 1) return 0;
+                return Layout.IdleWeatherPadX;
+            }
         }
 
         /* ------------------------------------------------------------ 每帧 */
@@ -352,7 +370,8 @@ namespace WinIsland
                搬进 PetLink.Sample —— 这样「换层时球会不会跳」在窗口之外也能断言，
                不用靠抓像素猜。公式与搬运前逐位相同，只是换了位置。 */
             PetPose pose = PetLink.Sample(_petT, PetFadeSec, PetRunSec,
-                                          w, h, ix, iy, Width, d1, d2, PetGap);
+                                          w, h, ix, iy, Width, d1, d2, PetGap,
+                                          PetDockInset);
             _petSide = pose.Side;
             bool inDock = pose.InDock;
             double dia = pose.Dia;
@@ -601,6 +620,141 @@ namespace WinIsland
             Trace("pet idle (random pool)");
         }
 
+        /* ------------------------------------------------ 鼠标停到球上 */
+
+        bool _petHoverOn;   /* 光标此刻是否压在球上（去重用） */
+
+        /// <summary>
+        /// 光标进入 / 离开桌宠。进入就切到 hover（低头、眯眼、摇头），离开换回随机待机。
+        ///
+        /// 和 PetReact 的区别：这是**持续态**不是一次性反应 —— 没有冷却、不占保护期，
+        /// 只要鼠标还停在球上就一直播。所以它不走 PetReactionPolicy。
+        ///
+        /// 离开时只在「当前还是 hover」才复位：期间如果来了消息（状态被改成 curious）
+        /// 或者用户戳了一下（戳不改状态，但反应可能改），这里不该去覆盖别人设的状态，
+        /// 那些状态自己会回落。
+        /// </summary>
+        void PetHover(bool on)
+        {
+            /* 先记下现状再判 null：否则桌宠还没建起来时，这个标志永远不更新，
+               外面每 tick 都会因为「值不同」再喊一次。 */
+            _petHoverOn = on;
+            if (_petStage == null) return;
+
+            if (on)
+            {
+                /* 已经处在某个反应的状态里就别抢：让那一段播完，鼠标继续停着也仍是它的画面。
+                   挪开再回来就会进 hover，这是可接受的取舍 —— 反过来（悬停强行打断反应）
+                   会让「番茄钟结束转圈」被一次无意划过打断。 */
+                if (_reactState.Length > 0) { Trace("pet hover -> skipped (reaction active)"); return; }
+                _petStage.SetState("hover");
+                Trace("pet hover -> hover");
+            }
+            else
+            {
+                if (_petStage.State != "hover") { Trace("pet hover -> left (state=" + _petStage.State + ")"); return; }
+                _petStage.SetState(PetReactions.IdleState);
+                Trace("pet hover -> idle");
+            }
+        }
+
+        /* ------------------------------------------------ 事件驱动的反应 */
+
+        readonly PetReactionPolicy _reactPolicy = new PetReactionPolicy();
+        DispatcherTimer _reactTimer;
+
+        /* 回 idle 时用来判断「还是我设的那个状态吗」。
+           期间如果有更强的反应改掉了状态，旧定时器就不许再动手 ——
+           否则「来消息 → curious」刚切过去，会被上一条待办的回落直接抹成 idle。 */
+        string _reactState = "";
+
+        /// <summary>
+        /// 事件 → 桌宠反应。这是「绑事件」那一侧唯一的入口。
+        /// 和上面四个动作转发器（PetPoke/PetSetState/…）的关键区别：
+        /// **这里不调 EnsurePet()**。
+        /// EnsurePet 的语义是「动作前保证桌宠在」，它会把 _petOn 置真、
+        /// 写 Prefs.Pet 并落盘 —— 那是给用户主动点按钮用的。
+        /// 事件不能有这种副作用：用户把桌宠关着的时候，来一条微信不该让桌宠
+        /// 自己蹦出来，更不该悄悄把他的偏好改掉。
+        /// </summary>
+        void PetReact(string evt)
+        {
+            PetReaction r = PetReactions.Get(evt);
+            if (r == null) { Trace("pet react skip " + evt + " (unknown event)"); return; }
+            if (!_petOn || _petStage == null)
+            {
+                Trace("pet react skip " + evt + " (pet off)");
+                return;
+            }
+
+            long now = _clock.ElapsedMilliseconds;
+            if (!_reactPolicy.Accept(r, now))
+            {
+                Trace("pet react skip " + evt + " (throttled)");
+                return;
+            }
+
+            try
+            {
+                if (r.State != null && r.State.Length > 0) _petStage.SetState(r.State);
+                if (r.Poke) _petStage.Poke();
+                if (r.Spin) _petStage.Spin();
+                if (r.Jump) _petStage.Jump();
+                PlacePet();
+            }
+            catch (Exception ex)
+            {
+                Trace("pet react failed " + evt + ": " + ex.GetType().Name + ": " + ex.Message);
+                return;
+            }
+
+            _reactState = r.State == null ? "" : r.State;
+            /* 把真正发出的脉冲也记下来：只看「-> happy」的话，分不清跳跃有没有被调用 ——
+               而「勾完待办要跳一下」这个要求，恰恰只体现在这一层。 */
+            Trace("pet react " + evt + " -> "
+                  + (_reactState.Length == 0 ? "impulse" : _reactState)
+                  + " p=" + r.Priority
+                  + (r.Poke ? " poke" : "")
+                  + (r.Spin ? " spin" : "")
+                  + (r.Jump ? " jump" : ""));
+
+            /* 改过状态的才需要回落；纯脉冲（transfer.drop）本来就没离开 idle 语义 */
+            if (r.HoldMs > 0 && _reactState.Length > 0) ScheduleReactIdle(r.HoldMs);
+        }
+
+        /// <summary>
+        /// 到期回随机待机。一次性动作播完必须回落，否则桌宠会永久卡在
+        /// 某个表情的最后一帧上 —— 这是这类功能最常见的翻车方式。
+        /// </summary>
+        void ScheduleReactIdle(int ms)
+        {
+            if (_reactTimer == null)
+            {
+                _reactTimer = new DispatcherTimer(DispatcherPriority.Background);
+                _reactTimer.Tick += OnReactIdle;
+            }
+            _reactTimer.Stop();
+            _reactTimer.Interval = TimeSpan.FromMilliseconds(ms);
+            _reactTimer.Start();
+        }
+
+        void OnReactIdle(object sender, EventArgs e)
+        {
+            DispatcherTimer t = sender as DispatcherTimer;
+            if (t != null) t.Stop();
+            if (!_petOn || _petStage == null) return;
+
+            /* 状态已经被别的反应改掉了：这一拍作废，不要去覆盖新动作 */
+            if (_reactState.Length > 0 && _petStage.State != _reactState) return;
+
+            _reactState = "";
+            /* 鼠标还停在球上就回 hover，别掉回随机待机 ——
+               否则「悬停中来了条消息」之后，球会一直发呆到你把鼠标挪开再挪回来。 */
+            _petStage.SetState(_petHoverOn ? "hover" : PetReactions.IdleState);
+            PlacePet();
+            Trace("pet react -> " + (_petHoverOn ? "hover (still hovered)" : "idle (settled)"));
+        }
+
         /* 菜单勾选用的当前态。桌宠没开时返回空串，于是「表情模式」和
            「全部动画」里的勾选全灭 —— 这比留着上一次的勾更诚实。 */
         string PetStateKey()
@@ -702,6 +856,27 @@ namespace WinIsland
                 await SampleTransition("expanded_to_idle", log, json, steps);
                 await SettlePet();
                 PetShot("layer1return", log, json, steps);
+
+                /* ⑤ 鼠标停在球上：低头 + 眯眼 + 左右摇头。
+                   等 0.5s 再抓，正好落在摇头的一个极值上（片段 0.35~0.8s 处 yaw 到 ±13°），
+                   抓在 t=0 附近那三样都还没起来，图上看不出区别。 */
+                if (_petStage != null)
+                {
+                    _petStage.SetState("hover");
+                    await Task.Delay(500);
+                    /* 先把「驱动数据」记下来再抓图：图一样不等于状态对，
+                       分开记才分得清是「状态没生效」还是「抓图抓错了对象」。 */
+                    PetFrame hf = _petStage.Frame;
+                    log.AppendLine("hover state=" + _petStage.State
+                                   + " frames=" + _petStage.Frames
+                                   + " pitch=" + hf.Pitch.ToString("0.000")
+                                   + " yaw=" + hf.Yaw.ToString("0.000")
+                                   + " lid=" + hf.Lid.ToString("0.000")
+                                   + " clip=" + (hf.State == null ? "null" : hf.State));
+                    PetShot("hover", log, json, steps);
+                    _petStage.SetState("idle");
+                    await Task.Delay(120);
+                }
 
                 /* 真窗口抓屏：证明这套东西真的被合成到屏幕上 */
                 if (ScreenShotForProbe() != null) json.AppendLine("  \"screenShot\": true,");

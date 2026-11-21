@@ -121,6 +121,9 @@ namespace WinIsland
 
         public void Spin() { _runtime.Spin(); }
 
+        /// <summary>跳一下（比 Poke 高得多，带蓄力与落地）。</summary>
+        public void Jump() { _runtime.Jump(); }
+
         public void SetState(string state) { _runtime.SetState(state); }
 
         /// <summary>第三层打开期间置真：底稿钉在静止中立帧，眼睛仍跟鼠标。</summary>

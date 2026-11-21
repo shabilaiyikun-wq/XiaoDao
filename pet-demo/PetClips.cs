@@ -18,7 +18,13 @@ namespace WinIsland
         {
             switch (e)
             {
-                case PetExpression.Happy: return new PetEyePose(.29,.066,side*-.06,.09,.02);
+                /* Bend 的语义（由 Pet3D.EyeBoundary 消费）：拱起幅度 = Bend × **眼宽**。
+                   |Bend| ≥ Pet3D.ArchBend(0.25) 才画成拱桥形，以下仍是胶囊。
+                   Happy 的 0.38 意思是「拱起 0.38 个眼宽」——
+                   眼睛宽 0.29、拱高因此约 0.11，比例约 1:2.6，才看得出来是个拱。
+                   （早先按眼高算过一次：0.066×0.9=0.059，屏幕上只有 1 DIP 高、
+                   而眼宽 4.9 DIP，比例 1:5，看起来仍然是一根平线 —— 所以改按眼宽。） */
+                case PetExpression.Happy: return new PetEyePose(.29,.066,side*-.06,.38,.02);
                 case PetExpression.Surprised: return new PetEyePose(.23,.64,0,0,.025);
                 case PetExpression.Sleepy: return new PetEyePose(.25,.13,side*.10,-.02,-.03);
                 case PetExpression.Focused: return new PetEyePose(.18,.35,side*-.14,0,0);
@@ -89,18 +95,50 @@ namespace WinIsland
           new PetClip{Name="idle-wink",Duration=4.2,Rotation=new PetTrack(K(0,0,0,0),K(1.3,0,-4,-7),K(2.3,0,-4,-7),K(3.4,0,0,0)),Expressions=new[]{new PetFaceKey(.65,PetExpression.Wink),new PetFaceKey(2.2,PetExpression.Happy),new PetFaceKey(3.4,PetExpression.Neutral)}},
           new PetClip{Name="idle-morph",Duration=5.2,Shape=1,Morph=new PetTrack(K(0,0),K(.8,0),K(.917,0),K(.94,1),K(.95,1),K(.97,0),K(5.2,0)),Squash=new PetTrack(K(0,1,1),K(1.3,.97,1.03),K(3.8,1,1)),Expressions=new[]{new PetFaceKey(.7,PetExpression.Curious),new PetFaceKey(1.06,PetExpression.Neutral)},Lids=Blink(.8)}
         };
+        /* 鼠标停到球上时的样子：低头 + 眯眼 + 左右摇头，循环播放直到鼠标离开。
+
+           三个通道各管一件事，别混：
+             Rotation 的 [0]/[1]/[2] = pitch / yaw / roll（度，见 PetClip.Sample）；
+                       正 pitch 是低头（idle-look-up 用的是 -7，那是抬头）。
+             Lids     0~1，1 = 完全闭眼；Pet3D 里 Height *= (1-Lid)，
+                       所以 0.55 就是「眼睛只剩四成半高」= 眯眼。
+             Gaze     的 +Y 向上；低头配一个向下的注视，姿态才自洽。
+
+           为什么不写 Expressions：默认就是 Neutral（竖长那种眼型），
+           叠上 Lid 0.55 正好是「半睁半闭的眯眼」。换成 Calm（宽而扁）再压
+           0.55 会扁到几乎看不见眼睛，读起来像闭上了 —— 那不是要的效果。
+
+           时长 2.6s：里面走完 2 个来回的摇头。它是循环片段，
+           鼠标一离开就换回 idle，所以首尾都回到 0 姿态，接回 idle 不会跳。
+
+           声明顺序：必须排在 Idle 之前。Idle 的初始化会去查「被绑定的状态用到哪些
+           片段」，万一以后把 hover 也绑上事件，那次查询就会取到这个字段；
+           静态字段按文本顺序初始化，排在后面就是 null。 */
+        public static readonly PetClip Hover = new PetClip {
+            Name = "hover-shy", Duration = 2.6,
+            Rotation = new PetTrack(
+                K(0, 10, 0, 0), K(.35, 12, -13, 2), K(.8, 12, 13, -2),
+                K(1.25, 12, -13, 2), K(1.7, 12, 13, -2), K(2.15, 11, 0, 1), K(2.6, 10, 0, 0)),
+            Lids = new PetTrack(K(0, .18), K(.3, .55), K(2.3, .55), K(2.6, .18)),
+            Gaze = new PetTrack(K(0, 0, 0), K(.4, 0, -.42), K(2.2, 0, -.42), K(2.6, 0, -.12)),
+            Squash = new PetTrack(K(0, 1, 1), K(.4, 1.02, .975), K(2.2, 1.015, .985), K(2.6, 1, 1))
+        };
+
         public static readonly PetClip[] Idle = BuildIdlePool();
 
-        /* 随机待机池 = 既有 7 段自制待机 + 28 段参考动画里除 Blocked_A 的 27 段（共 34 段）。
+        /* 随机待机池 = 7 段自制待机 + 参考动画里**没被绑定占用**的那些。
 
-           以前池子里只有那 7 段自制在转，参考动画只能从右键菜单手点：点一次播一次，
-           播完就回到 7 段里循环，等于 28 段做出来没进日常。现在它们进同一个池子，
-           洗牌仍然由 runtime 负责（PetAnim.NextClip → PetRandom.Shuffle：一次洗出
-           一整副牌，牌内天然不重复；换牌时再把与上一段相同的那张换出首位），
-           所以「相邻两段不重复」的判据不因为池子从 7 涨到 34 而失效。
+           池子的组成不是手工名单，而是从绑定表推导的（见 BuildIdlePool）。
+           规则一句话：**被绑到事件上的动作，一律不进随机池**。
 
-           为什么单独排掉 Blocked_A：它是「被拦住」的负向动作，表情走 confused→neutral，
-           在没有上下文的自播里只会读成「它卡住了」。手点「全部动画」仍然可以播它。
+           为什么要有这条：一个片段一旦被用来表达「某事发生了」，它就不能同时
+           在待机里随机出现 —— 否则「Done」既是「收工庆祝」又是路过的一个随机动画，
+           信号就废了（你会分不清它是在庆祝还是在发呆）。这也是添加 hover-shy 时
+           一开始就没让它进池子的同一个理由。
+
+           为什么单独再排掉 Blocked_A：它是「被拦住」的负向动作，表情走
+           confused→neutral，在没有上下文的自播里只会读成「它卡住了」。
+           这跟绑定无关，是内容上的取舍。手点「全部动画」仍然可以播它。
 
            为什么 7 段自制排在最前：PetAnim 构造时拿 Idle[0] 当初始片段，
            起手静止姿态因此与改动前逐帧一致（外观没变）。 */
@@ -110,12 +148,13 @@ namespace WinIsland
             List<PetClip> pool = new List<PetClip>(authored);
             try
             {
+                string[] reserved = ReservedClipNames();
                 foreach (PetClipGroup group in ReferenceClips.Groups)
                 {
                     for (int i = 0; i < group.Clips.Length; i++)
                     {
                         string name = group.Clips[i];
-                        if (name == ExcludedIdleReference) continue;
+                        if (Array.IndexOf(reserved, name) >= 0) continue;
                         PetClip clip = ReferenceClips.Find(name);
                         if (clip != null) pool.Add(clip);
                     }
@@ -131,11 +170,54 @@ namespace WinIsland
             return pool.ToArray();
         }
 
-        /* 随机待机里唯一被排掉的参考动画。改这个常量就是改随机池的组成。 */
+        /// <summary>
+        /// 不许进随机池的片段名 = 「被绑定状态用到的所有片段」+ 内容上排掉的负向动作。
+        ///
+        /// 前半段是推导出来的：绑了新事件不用回来改这里。
+        /// 万一某个绑定写了 ForState 不认识的状态名，ForState 会回落到 Idle
+        /// （初始化期间还是 null），下面两处 null 判断会跳过它 —— 不炸，但也不会排除；
+        /// 「状态名拼错」这件事由 AnimationTests 里的断言负责抓。
+        /// </summary>
+        public static string[] ReservedClipNames()
+        {
+            List<string> names = new List<string>();
+            names.Add(ExcludedIdleReference);
+
+            string[] bound = PetReactions.BoundStates();
+            for (int s = 0; s < bound.Length; s++)
+            {
+                PetClip[] clips = ForState(bound[s]);
+                if (clips == null) continue;
+                for (int i = 0; i < clips.Length; i++)
+                {
+                    if (clips[i] == null || clips[i].Name == null) continue;
+                    if (!names.Contains(clips[i].Name)) names.Add(clips[i].Name);
+                }
+            }
+            return names.ToArray();
+        }
+
+        /* 内容上排掉的参考动画（与绑定无关，理由见上）。 */
         const string ExcludedIdleReference = "Blocked_A";
 
         public static PetClip MorphDemo { get { return AuthoredIdle[6]; } }
+
         public static PetClip[] ForState(string s)
-        { switch(s){case "happy":return new[]{ReferenceClips.Find("Done_A"),ReferenceClips.Find("Done_B"),ReferenceClips.Find("Done_C")};case "thinking":return new[]{ReferenceClips.Find("Working_A"),ReferenceClips.Find("Working_B"),ReferenceClips.Find("Working_C"),ReferenceClips.Find("Working_D"),ReferenceClips.Find("Working_E"),ReferenceClips.Find("Working_F")};case "sleepy":return new[]{ReferenceClips.Find("Blocked_C")};case "curious":return new[]{ReferenceClips.Find("Working_B")};case "morph":return new[]{AuthoredIdle[6]};default:return Idle;} }
+        {
+            switch (s)
+            {
+                case "happy": return new[]{ ReferenceClips.Find("Done_A"), ReferenceClips.Find("Done_B"), ReferenceClips.Find("Done_C") };
+                case "thinking": return new[]{ ReferenceClips.Find("Working_A"), ReferenceClips.Find("Working_B"), ReferenceClips.Find("Working_C"), ReferenceClips.Find("Working_D"), ReferenceClips.Find("Working_E"), ReferenceClips.Find("Working_F") };
+                case "sleepy": return new[]{ ReferenceClips.Find("Blocked_C") };
+                case "curious": return new[]{ ReferenceClips.Find("Working_B") };
+                case "morph": return new[]{ AuthoredIdle[6] };
+                /* 被拎着走：晃两下。单独给个状态名，别复用 thinking —— 语义不同，
+                   而且池子排除是按状态反查片段的，混用会把两件事绑死在一起。 */
+                case "dizzy": return new[]{ ReferenceClips.Find("Rotation_C") };
+                /* 鼠标停球上：一段循环。 */
+                case "hover": return new[]{ Hover };
+                default: return Idle;
+            }
+        }
     }
 }

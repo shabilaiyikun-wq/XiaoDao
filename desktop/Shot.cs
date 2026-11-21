@@ -486,7 +486,7 @@ namespace WinIsland
         {
             _barSize = new TextBlock();
             _barSize.FontFamily = new FontFamily(Ui.FontUi);
-            _barSize.FontSize = 11.5;
+            _barSize.FontSize = 12;
             _barSize.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xEC, 0xF2));
             _barSize.VerticalAlignment = VerticalAlignment.Center;
             _barSize.Margin = new Thickness(0, 0, 9, 0);
@@ -586,7 +586,7 @@ namespace WinIsland
 
             TextBlock t = new TextBlock();
             t.FontFamily = new FontFamily(Ui.FontUi);
-            t.FontSize = 12.5;
+            t.FontSize = 13;
             t.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xEC, 0xF2));
             t.Text = "点一下截全屏  ·  拖动可自己框选  ·  松手后拖边角微调  ·  Enter 完成  ·  Esc 取消";
             b.Child = t;

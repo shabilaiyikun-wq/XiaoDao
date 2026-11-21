@@ -114,13 +114,42 @@ namespace WinIsland
     }
     struct PetImpulse
     {
-        public bool Spin; public double Age;
-        public double Duration { get { return Spin ? 0.9 : 0.62; } }
+        /* 三种脉冲。以前是 bool Spin，两态就够；加跳跃之后三态，
+           再堆 bool 会出现「Spin 和 Jump 同时为真」这种没有意义的状态。 */
+        public const int KindPoke = 0;
+        public const int KindSpin = 1;
+        public const int KindJump = 2;
+
+        public int Kind; public double Age;
+        public double Duration
+        {
+            get
+            {
+                if (Kind == KindSpin) return 0.9;
+                if (Kind == KindJump) return 1.15;
+                return 0.62;
+            }
+        }
         public void Apply(ref PetFrame f)
         {
             double t = Math.Min(1, Age / Duration);
-            if (Spin) f.Yaw += Math.PI * (1 - Math.Cos(Math.PI * t));
-            else
+            if (Kind == KindSpin) { f.Yaw += Math.PI * (1 - Math.Cos(Math.PI * t)); return; }
+            if (Kind == KindJump)
+            {
+                /* 跳跃：下蹲蓄力 → 腾空 → 落地压缩 → 收。
+                   和戳的区别不只是高度：戳（22.2px）是「被碰了一下」的单段弹跳，
+                   跳跃有明确的三段（蓄力/腾空/落地），才读得出「它自己跳起来了」。
+
+                   OffsetY 是负的向上（见 Position 轨道里 OffsetY=-v[1]*74，
+                   以及戳那条 -22.2）。这里峰值 52px，约两倍身位。 */
+                double crouch = AnimationMath.Pulse(t, 0, 0.22);   /* 下蹲 */
+                double land = AnimationMath.Pulse(t, 0.74, 1);      /* 落地缓冲 */
+                double air = AnimationMath.Pulse(t, 0.22, 0.74);    /* 腾空 */
+                f.OffsetY -= 52.0 * Math.Sin(Math.PI * AnimationMath.Clamp((t - 0.16) / 0.62, 0, 1));
+                f.SquashX *= 1 + 0.11 * (crouch + land) - 0.06 * air;
+                f.SquashY *= 1 - 0.15 * (crouch + land) + 0.10 * air;
+                return;
+            }
             {
                 double contact = AnimationMath.Pulse(t, 0, 0.18) + AnimationMath.Pulse(t, 0.82, 1);
                 double air = AnimationMath.Pulse(t, 0.18, 0.82);

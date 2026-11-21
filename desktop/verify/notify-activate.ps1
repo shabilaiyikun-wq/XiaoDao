@@ -46,9 +46,36 @@ Check ($src -match 'finally[\s\S]{0,400}AttachThreadInput\(GetCurrentThreadId\(\
   "AttachThreadInput is always detached (try/finally)" `
   "input-queue attach can leak -- that wedges the thread"
 
-Check ($src -match 'IsWindowVisible\(h\)') `
-  "window picker filters on visibility" `
-  "window picker has no visibility filter"
+$pickerStart = $src.IndexOf('static IntPtr FindMainWindow')
+$pickerEnd = $src.IndexOf('static IntPtr FindWindowOf', $pickerStart)
+$picker = $src.Substring($pickerStart, $pickerEnd - $pickerStart)
+Check ($picker -match 'if \(!IsWindowVisible\(h\)\) return true;[\s\S]*bool isMainTitle') `
+  "hidden main windows are excluded before title matching" `
+  "a hidden title match can still be selected for activation"
+
+Check ($picker -match 'if \(app == App\.WeChat\) return IntPtr\.Zero;') `
+  "WeChat activation never falls back to a toast or helper window" `
+  "WeChat activation can still select a visible non-main window"
+
+$activationStart = $src.IndexOf('static bool BringToFront')
+$activationEnd = $src.IndexOf('static IntPtr FindMainWindow', $activationStart)
+$activation = $src.Substring($activationStart, $activationEnd - $activationStart)
+Check ($activation -match 'if \(IsIconic\(hwnd\)\)\s*\{\s*ShowWindowAsync\(hwnd, SW_RESTORE\);') `
+  "a minimized window is restored asynchronously" `
+  "activation does not use the asynchronous restore path"
+
+Check (-not ($activation -match 'RebuildSurface|BumpSize|SetWindowPos|SW_MINIMIZE|ShowWindow\(hwnd')) `
+  "activation does not force a foreign-window surface transition" `
+  "activation still shows, minimizes, or resizes the foreign window"
+
+Check (-not ($src -match 'NudgeRepaint|PostMessageW\(hwnd,\s*WM_SIZE')) `
+  "activation does not synthesize repaint messages for the foreign window" `
+  "activation still injects repaint or WM_SIZE messages into the foreign window"
+
+Check ($src -match 'TryWakeFromTray' -and $src -match 'InvokePattern\.Pattern' -and
+       $src -match 'targets\.Count\s*!=\s*1') `
+  "hidden WeChat is opened through one uniquely matched tray button" `
+  "hidden WeChat has no unique, accessibility-based tray activation path"
 
 # ---------------------------------------------------------------- runtime check
 # Replay the picker against the real windows of every WeChat/QQ process on this
@@ -92,7 +119,7 @@ public class PICK
 
         IntPtr byTitle = IntPtr.Zero, byArea = IntPtr.Zero;
         long best = 0;
-        string areaInfo = "";
+        string areaInfo = "", titleInfo = "";
 
         EnumWindows(delegate(IntPtr h, IntPtr p)
         {
@@ -108,7 +135,11 @@ public class PICK
             if (!GetWindowRect(h, out r)) return true;
             int w = r.R - r.L, hh = r.B - r.T;
 
-            if (tb.ToString() == title && byTitle == IntPtr.Zero) { byTitle = h; return true; }
+            if (tb.ToString() == title && byTitle == IntPtr.Zero) {
+                byTitle = h;
+                titleInfo = "vis=" + (IsWindowVisible(h) ? 1 : 0);
+                return true;
+            }
 
             long area = (long)w * (long)hh;
             if (area > best) {
@@ -122,7 +153,7 @@ public class PICK
             return true;
         }, IntPtr.Zero);
 
-        if (byTitle != IntPtr.Zero) return "byTitle";
+        if (byTitle != IntPtr.Zero) return "byTitle|" + titleInfo;
         if (byArea != IntPtr.Zero) return "byArea|" + areaInfo;
         return "none";
     }
@@ -160,8 +191,8 @@ public class PICK
             string info = "cls=" + cb.ToString() + "|vis=" + (IsWindowVisible(h) ? 1 : 0)
                         + "|x=" + r.L + "|y=" + r.T + "|w=" + w + "|h=" + hh;
 
-            if (tb.ToString() == title && byTitle == IntPtr.Zero) { byTitle = h; titleInfo = info; return true; }
             if (!IsWindowVisible(h)) return true;
+            if (tb.ToString() == title && byTitle == IntPtr.Zero) { byTitle = h; titleInfo = info; return true; }
             if (r.L <= -30000 || r.T <= -30000) return true;
 
             long area = (long)w * (long)hh;
@@ -170,6 +201,7 @@ public class PICK
         }, IntPtr.Zero);
 
         if (byTitle != IntPtr.Zero) return "byTitle|" + titleInfo;
+        if (title == "微信") return "none";
         if (byArea != IntPtr.Zero) return "byArea|" + areaInfo;
         return "none";
     }
@@ -196,8 +228,15 @@ function Test-App($name, $pattern, $title) {
   }
   $vis = ($res -split '\|') | Where-Object { $_ -like 'vis=*' }
   $x = (($res -split '\|') | Where-Object { $_ -like 'x=*' }) -replace 'x=', ''
-  Check ($vis -eq 'vis=1') ("{0}: picked window is visible" -f $name) ("{0}: picked a HIDDEN window -- SetForegroundWindow will fail" -f $name)
-  Check ([int]$x -gt -30000) ("{0}: picked window is not a minimized placeholder" -f $name) ("{0}: picked a -32000 placeholder" -f $name)
+  $byTitle = $res -like 'byTitle*'
+
+  Check ($vis -eq 'vis=1') ("{0}: selected window is visible" -f $name) ("{0}: selected a hidden window" -f $name)
+
+  # -32000 placeholders are the minimized icon seat; BringToFront's IsIconic/SW_RESTORE
+  # path owns that case, so it is not a failure either way. Keep it informational.
+  if ([int]$x -le -30000) {
+    Write-Output ("   --   {0}: window sits at the minimized seat (x={1}); SW_RESTORE handles it" -f $name, $x)
+  }
 }
 
 Write-Output ""

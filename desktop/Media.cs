@@ -446,10 +446,43 @@ namespace WinIsland
            —— 否则卡片建好之后封面再也不会更新（切歌后仍显示上一首的图）。 */
         static int _artVersion;
 
+        /* 封面重试状态。
+
+           为什么需要重试：切歌那一刻 SMTC 的属性常常已经可选、但 Thumbnail 还是 null
+           （播放器还没来得及发布封面）。而下一轮轮询（400ms 后）看到 key 没变就直接
+           return —— 于是**这首歌整首都停在没封面**，只是因为第一次动手早了一拍。
+           这就是「好多歌获取不到封面」的真正原因：不是格式问题，是抢跑。
+
+           歌词模块早就遇到过同一件事（见 EnsureLyric 里那段注释：原来同一首歌
+           一旦查过就永不重试），这里补上同一套：失败后按退避重试，次数有上限。 */
+        static int _artAttempts;
+        static int _artLastTryTick;
+        static string _artFailReason = "";
+
+        /* 诊断出口。封面取不到的原因以前全是静默的（Thumbnail 为 null / 超时 /
+           超过大小上限 / 异常），用户只看到「好多歌没封面」，却没有任何线索。
+           接线在 IslandWindow，落到日志。 */
+        public static Action<string> Diag;
+
         public static int ArtVersion() { return Volatile.Read(ref _artVersion); }
 
+        /* 6 次尝试、退避 0.6/1.2/2.4/4.8/6s：正常情况下封面 1 秒内就绪，
+           这些尝试足够覆盖「播放器慢」的情况，又不会把工作线程打成忙循环。 */
+        const int ArtMaxAttempts = 6;
+        /* 单张封面上限。超过就放弃并记账 —— 高分辨率 PNG 确实可能超过这个数，
+           但 4MB 以上的解码会压在 UI 线程上，不值得为一张封面付这个代价。 */
+        const int ArtMaxBytes = 4 * 1024 * 1024;
+
+        static int ArtBackoffMs(int attempts)
+        {
+            if (attempts <= 1) return 0;                 /* 第一次立刻取 */
+            int shift = Math.Min(4, attempts - 2);
+            int ms = 600 << shift;                       /* 600,1200,2400,4800,9600 */
+            return ms > 6000 ? 6000 : ms;
+        }
+
         /* 只在 (应用 + 专辑 + 曲名) 变了才去取字节，否则 400ms 一次会把播放器问烦。
-           取失败就清空，不能留着上一首的封面冒充新歌。 */
+           取失败就清空，不能留着上一首的封面冒充新歌；但**失败要能重试**。 */
         static void RefreshArt(GlobalSystemMediaTransportControlsSession s, NowPlaying np)
         {
             if (s == null || np == null || !np.Has)
@@ -458,46 +491,96 @@ namespace WinIsland
                 {
                     _art = null;
                     _artKey = "";
+                    _artAttempts = 0;
+                    _artFailReason = "";
                     Interlocked.Increment(ref _artVersion);
                 }
                 return;
             }
 
             string key = np.App + "\u0001" + np.Album + "\u0001" + np.Title;
-            if (key == _artKey) return;
-            _artKey = key;
+            if (key == _artKey)
+            {
+                /* 已经有图：不必再问播放器 */
+                if (_art != null) return;
+                /* 没图：可能只是当时还没就绪。给有限次数的重试机会。 */
+                if (_artAttempts >= ArtMaxAttempts) return;
+                if (Environment.TickCount - _artLastTryTick < ArtBackoffMs(_artAttempts)) return;
+            }
+            else
+            {
+                /* 换歌：立刻清掉旧图（不能让上一首的封面冒充新歌），然后马上试 */
+                _artKey = key;
+                _artAttempts = 0;
+                _artFailReason = "";
+                if (_art != null)
+                {
+                    _art = null;
+                    Interlocked.Increment(ref _artVersion);
+                }
+            }
+
+            _artAttempts++;
+            _artLastTryTick = Environment.TickCount;
 
             byte[] buf = null;
+            string reason = "";
             try
             {
                 GlobalSystemMediaTransportControlsSessionMediaProperties p = _props;
-                if (p != null && p.Thumbnail != null)
+                if (p == null) reason = "no-props";
+                else if (p.Thumbnail == null) reason = "no-thumbnail";
+                else
                 {
                     IRandomAccessStreamWithContentType rs = Wait(p.Thumbnail.OpenReadAsync());
-                    if (rs != null && rs.Size > 0)
+                    if (rs == null || rs.Size <= 0) reason = "empty-stream";
+                    else if (rs.Size > ArtMaxBytes) reason = "too-big:" + rs.Size;
+                    else
                     {
                         uint size = (uint)rs.Size;
-                        if (size <= 4 * 1024 * 1024)
-                        {
-                            buf = new byte[size];
-                            DataReader dr = new DataReader(rs);
-                            Wait(dr.LoadAsync(size));
-                            dr.ReadBytes(buf);
-                            dr.Dispose();
-                        }
+                        buf = new byte[size];
+                        DataReader dr = new DataReader(rs);
+                        Wait(dr.LoadAsync(size));
+                        dr.ReadBytes(buf);
+                        dr.Dispose();
+                        if (buf.Length == 0) { buf = null; reason = "zero-bytes"; }
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 buf = null;
+                reason = ex.GetType().Name;
             }
 
-            /* 整块替换，不要先清空 —— 先清空会让界面闪一下占位渐变，
-               贴图只有 60KB、读取 10ms 级，直接换掉更干净。 */
-            _art = buf;
-            Interlocked.Increment(ref _artVersion);
+            if (buf != null)
+            {
+                /* 整块替换，不要先清空 —— 先清空会让界面闪一下占位渐变，
+                   贴图只有 60KB、读取 10ms 级，直接换掉更干净。 */
+                _art = buf;
+                Interlocked.Increment(ref _artVersion);
+                _artFailReason = "";
+                if (_artAttempts > 1) ArtDiag("art ok after " + _artAttempts + " tries: " + np.Title);
+            }
+            else
+            {
+                _artFailReason = reason;
+                /* 第一次失败和彻底放弃各记一行：前者解释「为什么这一拍没图」
+                   （通常就是抢跑），后者才是真正取不到的歌。中间的退避不吵。 */
+                if (_artAttempts == 1) ArtDiag("art miss try1 (" + reason + "): " + np.Title);
+                else if (_artAttempts >= ArtMaxAttempts)
+                    ArtDiag("art give up after " + _artAttempts + " tries (" + reason + "): " + np.Title);
+            }
         }
+
+        static void ArtDiag(string s)
+        {
+            Action<string> d = Diag;
+            if (d != null) { try { d("[media] " + s); } catch { } }
+        }
+
+        /// <summary>最近一次封面失败的原因（诊断用；成功时为空串）。</summary>
+        public static string ArtFailReason() { return _artFailReason; }
 
         /* ---------------------------------------------------------------- 歌词 */
 

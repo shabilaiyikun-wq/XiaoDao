@@ -18,6 +18,18 @@ namespace WinIsland
 {
     partial class IslandWindow : Window
     {
+        /* --pet-react <event>：启动后把某个桌宠反应当场放一遍。
+
+           为什么要这个开关：四个事件里有两个没法按需触发 ——
+           微信来消息要真有人发给你，番茄钟走完要等二十分钟。
+           没有它，每调一次配方（PetReactions.Get 里的参数）都得等真实事件
+           发生才能看效果，观感调不动。
+
+           用静态字段而不是第 22 个构造参数：这个构造已经有 21 个位置参数了，
+           再加一个只会让它更难读；而这是个一次性调试开关，没有跨实例语义。
+           取用后就置 null，避免同进程内重复触发。 */
+        public static string ReactProbe;
+
         /* 窗口留白：给落影和阴影描边用 */
         const double MX = 24, MT = 16, MB = 34;
 
@@ -44,7 +56,7 @@ namespace WinIsland
         Canvas _host;
         Canvas _content;
         Canvas _shadowLayer;
-        Rectangle _refract, _wash, _tint, _spec, _glow, _grain;
+        Rectangle _wash, _tint, _spec, _glow, _grain;
         Path _edge;
         Path _shA, _shB, _shC, _shD;
         ImageBrush _deskBrush;
@@ -52,8 +64,7 @@ namespace WinIsland
 
         /* ---------------------------------------------------- 玻璃边缘折射
            只给 glass 那套外观用：一张铺满岛体矩形的纹理，带内不透明、带外全透明，
-           内容是被「弯折」过的桌面采样（见 Glass.cs）。夹在 _refract 和 _wash
-           之间 —— 也就是压在真实采样之上、被同一层 wash + tint 盖住，
+           内容是被「弯折」过的桌面采样（见 Glass.cs）。压在 wash + tint 之下，
            所以配色一点没变，变的只是边缘那几个像素的几何。 */
         Rectangle _bend;
         ImageBrush _bendBrush;
@@ -120,6 +131,17 @@ namespace WinIsland
         bool _ignoring;
         IntPtr _hwnd;
         double _dpi = 1.0;
+
+        /* 第一层当前实际用的宽度。天气有没有数据会决定它 52 还是 82，
+           记住上一次的值才能在「数据到了」的那一帧只调一次，不每 400ms 抖一次。 */
+        double _idleW = Scenes.IdleW;
+
+        /* 上一次建第一层时，快照里到底有没有天气。宽度只反映「取到过没有」
+           （Scenes 那边问的是 Weather.Ready），内容却取决于 _snap.WxHas ——
+           两者会短暂不同步：启动时 Weather.Ready 已经为真（缓存读完了），
+           而 _snap 要等第一个 400ms tick 才填。只看宽度就会漏掉这个空窗，
+           画出一个 82 宽、却只有一颗居中球的岛。 */
+        bool _idleHasWx;
 
         BitmapSource _desktopShot;
         double _mx = 0.5, _my = 0.0;
@@ -205,6 +227,7 @@ namespace WinIsland
            画到外面就被裁掉了。 */
         const double NotifyGap = 10;
         const double NotifyBall = 34;
+        const double NotifyIconSize = 23;
         const double NotifyReserve = NotifyGap + NotifyBall;
 
         /* 球自己消失的时间。留着不消失会变成第二个状态栏图标；太短又容易错过。
@@ -219,6 +242,7 @@ namespace WinIsland
         Brush _ballMat;
         ImageBrush _ballRefract;
         Ellipse _ballCore;
+        Image _ballIcon;
         bool _ballOn;
         Notify.App _ballApp;
         DateTime _ballUntil = DateTime.MinValue;
@@ -305,6 +329,8 @@ namespace WinIsland
             Transfer.Diag = delegate(string s) { Trace(s); };
             Lyric.Diag = delegate(string s) { Trace(s); };
             Notify.Diag = delegate(string s) { Trace(s); };
+            /* 封面取不到的原因以前全是静默的，出问题只能靠猜 */
+            Media.Diag = delegate(string s) { Trace(s); };
 
             /* 桌面程序没有控制台，未处理异常会静默退出 —— 什么线索都不留。
                这里把它写进日志，并且不让一次绘制失败带走整个程序。 */
@@ -331,6 +357,9 @@ namespace WinIsland
                 Application.Current.Exit += delegate
                 {
                     Trace("application exit");
+                    /* 唯一写者的收尾：放在 Exit 而不是 BeginShutdown，
+                       这样退出路径上最后两条诊断行也能落盘。 */
+                    CloseLog();
                 };
 
                 Application.Current.Dispatcher.ShutdownStarted += delegate
@@ -378,12 +407,27 @@ namespace WinIsland
             _closing = true;
             Trace("island window closed externally -> releasing pet and shutting down");
             /* 集成版的球就在这棵树上：摘掉它、停掉计时器和每帧回调，
-               顺带把还给独立窗口诊断模式的 PetController 也收掉。 */
-            ReleasePet();
-            PetController.Release();
-            StopTimersForShutdown();
-            try { if (Application.Current != null) Application.Current.Shutdown(); }
-            catch (Exception ex) { Trace("shutdown after external close failed: " + ex.Message); }
+               顺带把还给独立窗口诊断模式的 PetController 也收掉。
+               三步各自 try，理由同 BeginShutdown：清理失败不该挡住退出。 */
+            try { ReleasePet(); }
+            catch (Exception ex) { Trace("external close: release pet failed " + ex.GetType().Name + ": " + ex.Message); }
+            try { PetController.Release(); }
+            catch (Exception ex) { Trace("external close: pet controller release failed " + ex.GetType().Name + ": " + ex.Message); }
+            try { StopTimersForShutdown(); }
+            catch (Exception ex) { Trace("external close: stop timers failed " + ex.GetType().Name + ": " + ex.Message); }
+            try
+            {
+                if (Application.Current != null) Application.Current.Shutdown(Environment.ExitCode);
+                else { ForceExit(); return; }
+            }
+            catch (Exception ex)
+            {
+                Trace("shutdown after external close failed: " + ex.Message);
+                ForceExit();
+                return;
+            }
+            /* 外部关窗同样可能被残留钉住（任务栏「结束任务」/系统关机都走这里） */
+            ArmExitWatchdog();
         }
 
         /// <summary>
@@ -443,16 +487,8 @@ namespace WinIsland
             _host = new Canvas();
             _root.Children.Add(_host);
 
-            _refract = MakeRect();
             _deskBrush = new ImageBrush();
             _deskBrush.Stretch = Stretch.Fill;
-            _refract.Fill = _deskBrush;
-            _refract.Effect = new System.Windows.Media.Effects.BlurEffect
-            {
-                Radius = 16,
-                KernelType = System.Windows.Media.Effects.KernelType.Gaussian
-            };
-            _host.Children.Add(_refract);
 
             /* 折射边带。插在采样层之上、wash 之下：和基底吃同一层色调，
                只是边缘那圈像素来自「弯折后」的采样点。 */
@@ -495,10 +531,10 @@ namespace WinIsland
                _ball        外层 = 岛体材质（折射图 + wash + 同款白边）
                _ballColor   中层 = **甜甜圈**：应用色的圆环，圆心是空的，
                             所以中间露出的是岛体材质，不是一块实心色饼
-               _ballCore     应用色**实心**圆盘，比球小一圈，外面那圈材质就是甜甜圈的圈
+               _ballCore     应用色底盘，透明图标部分会透出它
+               _ballIcon     居中的微信 / QQ 原图标
 
-           为什么中间要空：实心绿球在岛旁边太沉、太突兀。环状把视觉重量压下来，
-           而颜色本身已经足够区分微信和 QQ —— 所以不放文字。 */
+           图标在颜色底盘上方淡入；外圈仍保留岛体材质，让提醒球和岛的视觉保持一致。 */
             _ball = new Border();
             _ball.Width = NotifyBall;
             _ball.Height = NotifyBall;
@@ -509,9 +545,7 @@ namespace WinIsland
             _ball.Visibility = Visibility.Collapsed;
             _ball.IsHitTestVisible = false;
 
-            /* 颜色层只有一环，Background 留空：圆心和最外圈都透出岛体材质。
-               环往里收（Margin 5.6），所以**最外圈露出来的是材质，不是绿色** ——
-               绿环贴在外缘会显得像个硬边色圈。 */
+            /* 颜色层不填背景：只显示底盘和图标，外缘继续透出岛体材质。 */
             _ballColor = new Border();
             _ballColor.CornerRadius = new CornerRadius(NotifyBall / 2);
             _ballColor.Opacity = 0;
@@ -528,7 +562,19 @@ namespace WinIsland
             _ballCore.Margin = new Thickness(9);
             _ballCore.Fill = Brushes.Transparent;
 
-            _ballColor.Child = _ballCore;
+            Grid ballMark = new Grid();
+            ballMark.Children.Add(_ballCore);
+
+            _ballIcon = new Image();
+            _ballIcon.Width = NotifyIconSize;
+            _ballIcon.Height = NotifyIconSize;
+            _ballIcon.HorizontalAlignment = HorizontalAlignment.Center;
+            _ballIcon.VerticalAlignment = VerticalAlignment.Center;
+            _ballIcon.Stretch = Stretch.Uniform;
+            _ballIcon.IsHitTestVisible = false;
+            ballMark.Children.Add(_ballIcon);
+
+            _ballColor.Child = ballMark;
 
             /* wash 层：压在折射之上，跟岛体那层 RefractWash + 竖向 tint 一个意思。
                玻璃 look 的 tint 几乎是透明的（白 16%/4%、黑 14%），单靠它球会看不见
@@ -693,7 +739,7 @@ namespace WinIsland
             /* 消息提醒：只在 --notify 下开。 */
             if (_notify)
             {
-                Notify.Arrived += delegate(Notify.App app) { ShowBall(app); };
+                Notify.Arrived += delegate(Notify.App app) { ShowBall(app); PetReact("notify"); };
                 Notify.Start();
 
                 /* 验收用：不等真消息，直接亮一颗，方便肉眼确认位置和点击。
@@ -721,6 +767,15 @@ namespace WinIsland
                 hb.Tick += delegate
                 {
                     Trace("heartbeat island=" + Math.Round(_w.Value, 1) + "x" + Math.Round(_h.Value, 1)
+                          /* box = 窗口盒子的尺寸（DIP）。它必须始终 ≥ island：
+                             窗口是按场景的「展开尺寸+留白」定死的，岛只在这盒子里形变。
+                             换场景而漏调 SyncWindowSize 时，这个字段会当场露馅
+                             （island 比 box 大 = 卡片被窗口边界裁掉）。 */
+                          + " box=" + Math.Round(Width, 1) + "x" + Math.Round(Height, 1)
+                          /* 桌宠的命中圆（根坐标 DIP + 直径）。
+                             戳它靠的就是这个圆，量的时候不用去猜球心在哪。 */
+                          + " pet=" + Math.Round(_petCx, 1) + "," + Math.Round(_petCy, 1)
+                          + "@" + Math.Round(_petDia, 1)
                           + " win=" + Math.Round(Left, 1) + "," + Math.Round(Top, 1)
                           + " menu=" + _menuOpen + " drag=" + _dragging
                           + " scene=" + _scene + "/" + _state
@@ -781,6 +836,20 @@ namespace WinIsland
             if (_petAuto && (Prefs.Pet || _petForce) && !PetController.IsOn)
             {
                 Dispatcher.BeginInvoke(new Action(EnablePetByPreference), DispatcherPriority.Background);
+            }
+
+            /* --pet-react 探针：先把桌宠拉起来（走「照意愿执行」那条，不写偏好），
+               再放一遍指定的反应。排在偏好拉起之后同一优先级，所以 _petOn 通常
+               已经是 true，这里的 !_petOn 分支是给「用户关着桌宠」的情况兜底的。 */
+            if (ReactProbe != null && ReactProbe.Length > 0)
+            {
+                string probeEvent = ReactProbe;
+                ReactProbe = null;
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (!_petOn) EnablePetByPreference();
+                    PetReact(probeEvent);
+                }), DispatcherPriority.Background);
             }
 
             if (_wdaProbe)
@@ -850,7 +919,20 @@ namespace WinIsland
                这里只压一个带截止时间的提醒，压完自动还场景并允许收层。 */
             if (_scene != "todo") _remindScene = _scene;
             _scene = "todo";
+
+            /* 换场景必须重算窗口盒子。
+
+               窗口不是「要多大就多大」的：它按当前场景的 展开尺寸+留白 一次性定死
+               （见 SyncWindowSize），岛的形变只在窗口内部发生。这里直接把 _scene
+               改成 todo 而不重算，窗口还是上一个场景的盒子（media 是 452+2×24 宽、
+               206+16+34 高），而待办卡片按 468×292 建 → 底部那排指示点整排被裁掉。
+               进得来、出不去才是单向缺陷：返回走的是 GoScene，那条路有 SyncWindowSize。 */
+            SyncWindowSize();
+
             _remindUntilMs = _clock.Elapsed.TotalMilliseconds + RemindHold * 1000.0;
+
+            /* 桌宠跟着抬一下头：和 todo 卡展开是同一件事的两个说法 */
+            PetReact("todo.due");
 
             /* 必须走 SetState：它用 _w.Aim() 设目标并挂上 CompositionTarget.Rendering
                去跑弹簧动画。直接写 _w.Target 不会启动动画循环，岛会卡在旧尺寸。 */
@@ -1052,7 +1134,6 @@ namespace WinIsland
             Canvas.SetLeft(_shC, _ix); Canvas.SetTop(_shC, _iy + 9);
             Canvas.SetLeft(_shD, _ix); Canvas.SetTop(_shD, _iy + 6);
             _curIx = _ix; _curIy = _iy;
-            UpdateRefract();
             PlacePet();
         }
 
@@ -1130,7 +1211,7 @@ namespace WinIsland
 
         /* ------------------------------------------------------------ 状态机 */
         /* 三层各自的尺寸。自动模式下第二层固定是「封面+律动」那个小尺寸，
-   与当前选中的场景无关——因为那一层只表达「在放歌」。 */
+           与当前选中的场景无关——因为那一层只表达「在放歌」。 */
         void SizeOf(string state, out double w, out double h)
         {
             SceneDef def = Scenes.Get(_scene);
@@ -1141,8 +1222,12 @@ namespace WinIsland
                 else { w = Scenes.PlayW; h = Scenes.PlayH; }
                 return;
             }
-            w = Scenes.IdleW;
+            w = Weather.Ready ? Scenes.IdleWeatherW : Scenes.IdleW;
             h = Scenes.IdleH;
+            /* 记下这一版第一层是「按有天气」还是「按没天气」画的，
+               下次比较才知道要不要重画（见 SyncIdleWeatherWidth）。 */
+            _idleW = w;
+            _idleHasWx = _snap.WxHas;
         }
 
         /* 三层自动状态机：悬停 > 在放歌 > 空闲。
@@ -1173,6 +1258,7 @@ namespace WinIsland
             /* 输入窗开着时鼠标必然离开了岛（去打字了），这时候不能自动收回，
                否则用户一边写一边看着岛塌成小球 */
             if (TodoInput.Current != null && TodoInput.Current.IsOpen) return;
+            if (CityInput.Current != null && CityInput.Current.IsOpen) return;
 
             /* 拖动期间钉住展开：光标一旦离开岛体，_hover 就是 false，
                卡片会缩回去 —— 投放区在用户眼皮底下跑掉，DragLeave 立刻跟着来。
@@ -1270,6 +1356,8 @@ namespace WinIsland
 
             int added = Transfer.Add(paths);
             _dropOk = added;
+            /* 真塞进去了才挤一下；拖个不支持的文件进来不该有反应 */
+            if (added > 0) PetReact("transfer.drop");
 
             Trace("DROP items=" + (paths == null ? 0 : paths.Length)
                   + " added=" + added + " total=" + Transfer.Count());
@@ -1410,14 +1498,20 @@ namespace WinIsland
         void SetState(string next, bool immediate)
         {
             if (next == _state && !immediate) return;
-            /* 层变化是这一版最容易被间接路径改掉的东西（悬停、数据轮询、待办提醒、
-               贴合动画）。留一行日志，出问题时能直接看出是谁改的，不用猜。 */
-            Trace("state " + _state + " -> " + next + (immediate ? " (immediate)" : "")
-                  + (_petProbeLock ? " [probe-locked]" : ""));
-            _state = next;
 
             double tw, th;
             SizeOf(next, out tw, out th);
+
+            /* 层变化是这一版最容易被间接路径改掉的东西（悬停、数据轮询、待办提醒、
+               贴合动画）。留一行日志，出问题时能直接看出是谁改的，不用猜。
+
+               尺寸也一起打：光有「换到哪一层」看不出「画多大」，而第一层的宽度
+               是跟着天气走的（有数据 82，没数据 52）—— 这条日志是那件事的直接证据。 */
+            Trace("state " + _state + " -> " + next + (immediate ? " (immediate)" : "")
+                  + " " + Math.Round(tw) + "x" + Math.Round(th)
+                  + (next == "idle" ? " wx=" + (_snap.WxHas ? 1 : 0) : "")
+                  + (_petProbeLock ? " [probe-locked]" : ""));
+            _state = next;
 
             /* 改目标而不是重置：Spring.Aim 保留当前值与速度，所以「展开到一半
                又收回去」是从当前尺寸接着走，不是跳回起点重来。 */
@@ -1512,10 +1606,11 @@ namespace WinIsland
             double w = Math.Max(2, IslandW);
             double h = Math.Max(2, IslandH);
             double r = Math.Min(30, h / 2);
+            double exponent = Squircle.IslandExponent(h);
             double ix = _ix;
             double iy = _iy;
 
-            _shape = Squircle.Build(w, h, r);
+            _shape = Squircle.Build(w, h, r, exponent);
 
             _host.Width = w;
             _host.Height = h;
@@ -1523,7 +1618,6 @@ namespace WinIsland
             Canvas.SetLeft(_host, ix);
             Canvas.SetTop(_host, iy);
 
-            _refract.Width = w; _refract.Height = h;
             _bend.Width = w; _bend.Height = h;
             _wash.Width = w; _wash.Height = h;
             _tint.Width = w; _tint.Height = h;
@@ -1534,9 +1628,8 @@ namespace WinIsland
             _content.Width = w;
             _content.Height = h;
 
-            /* 折射底 */
+            /* 边缘折射 */
             _curIx = ix; _curIy = iy; _curW = w; _curH = h;
-            UpdateRefract();
             UpdateBend(look, w, h, r);
             PlaceBall();
 
@@ -1937,6 +2030,7 @@ namespace WinIsland
             Trace("clipboard -> transfer added=" + added);
             if (added > 0)
             {
+                PetReact("transfer.drop");
                 GoScene("transfer");
                 if (_state != "expanded") SetState("expanded", false);
                 Rebuild(false);
@@ -2010,8 +2104,8 @@ namespace WinIsland
                                   _grabber.Bits, _grabber.Stride * h, _grabber.Stride);
                 _liveFrames++;
 
-                /* 折射层和基底共用这一帧：喂进去之后标记脏，
-                   由下面的 UpdateBend 在节流窗口内重算边带。 */
+                /* 喂入实时采样后标记边带纹理待更新，
+                   由下面的 UpdateBend 在节流窗口内重算。 */
                 if (!_bendOff && Look.ByKey(_lookKey).Bend > 0)
                 {
                     _glass.Feed(_grabber.Bits, w, h, _grabber.Stride, _dpi);
@@ -2034,26 +2128,9 @@ namespace WinIsland
 
             /* 窗口一动、岛一变形，采样窗口就得跟着换。每帧一次 Rect 赋值，
                不做脏检查——比判断「要不要更新」更快。 */
-            UpdateRefract();
-
             /* 实时采样是静止时唯一的更新源：没有动画就没有 Apply，
                边带要么在这里跟一帧，要么就一直停在上一张桌面上。 */
             UpdateBend(Look.ByKey(_lookKey), _curW, _curH, Math.Min(30, _curH / 2));
-        }
-
-        void UpdateRefract()
-        {
-            Look look = Look.ByKey(_lookKey);
-            if (look.Refract && _deskBrush.ImageSource != null)
-            {
-                _refract.Visibility = Visibility.Visible;
-                _deskBrush.ViewboxUnits = BrushMappingMode.RelativeToBoundingBox;
-                _deskBrush.Viewbox = DeskViewbox(_curIx, _curIy, _curW, _curH);
-            }
-            else
-            {
-                _refract.Visibility = Visibility.Collapsed;
-            }
         }
 
         /* ------------------------------------------------------- 玻璃边缘折射
@@ -2177,12 +2254,20 @@ namespace WinIsland
            key 里要带上的东西 = 影响内容长什么样的全部输入：场景、层、外观、素材、
            自动/钉住（第二层的尺寸不同）、桌宠是否占着第一层那颗球的位置。
            少带一个就会「该重建的时候复用了旧脸」，症状是配色/文案不跟着变。 */
+        /* 脸的内容由这些输入决定，key 必须把它们全部带上。
+
+           漏一个就会「重建了但没变」：Show() 开头是
+           `if (Front != null && Front.Key == key) return;` —— key 相同就直接
+           返回，make 都不调用。天气那位当初就是这么漏的：启动时先按「没数据」
+           建了一张脸（StartData 还没跑），数据到了再 SetState，key 一模一样，
+           于是那张没有温度的脸一直留在场上，怎么刷新都不变。 */
         static string FaceKey(string state, string scene, string look, string art,
-                              bool auto, bool petDocked)
+                              bool auto, bool petDocked, bool wx)
         {
             return state + "|" + scene + "|" + look + "|" + art
                  + "|" + (auto ? "auto" : "pin")
-                 + "|" + (petDocked ? "dock" : "orb");
+                 + "|" + (petDocked ? "dock" : "orb")
+                 + "|" + (wx ? "wx" : "nowx");
         }
 
         void Rebuild(bool immediate)
@@ -2200,7 +2285,11 @@ namespace WinIsland
             bool petDocked = _petOn && _state == "idle";
             bool auto = !_pinnedState;
 
-            string key = FaceKey(_state, _scene, _lookKey, _artKey, auto, petDocked);
+            /* 第一层有没有天气，直接决定画什么（球居中 / 球贴左+温度贴右），
+               所以必须进 key —— 否则「数据到了」那次重建会被当成同 key 直接跳过。 */
+            bool wx = _snap.WxHas;
+
+            string key = FaceKey(_state, _scene, _lookKey, _artKey, auto, petDocked, wx);
 
             /* 内容按目标尺寸建（版面常量不变）。形变过程中的「还没长够」由
                _host 的超椭圆裁剪 + 进场延迟一起遮住，内容本身不缩放 —— 这就是
@@ -2246,9 +2335,12 @@ namespace WinIsland
                 FrameworkElement el = FaceElement(dead[i]);
                 if (el != null) _content.Children.Remove(el);
                 /* 被淘汰的脸不再属于任何人：把 Live 更新器也清掉，
-                   免得以后有人持有它还在往已经摘下来的树上写。 */
+                   免得以后有人持有它还在往已经摘下来的树上写。
+                   自己挂帧回调的控件（待办塔）靠 Halt 停帧 —— 清 Live
+                   不会摘掉 CompositionTarget.Rendering，静态事件会把窗口
+                   钉住不退出。 */
                 Built b = dead[i].Payload as Built;
-                if (b != null) b.Live.Clear();
+                if (b != null) b.Halt();
             }
             dead.Clear();
         }
@@ -2278,15 +2370,54 @@ namespace WinIsland
         }
 
         /* ---------------------------------------------------- 穿透与悬停 */
-        void Trace(string s)
+
+        /* 日志只有一个写者。
+
+           以前 Trace 用 File.AppendAllText（每次开/关一次句柄，而它的调用点里
+           有 hover 变化这种 16ms 热路径），RunSelfTest 又自己 new 一个 StreamWriter
+           写同一个文件：后者以 FileShare.Read 打开并截断，前者的写就撞共享冲突，
+           异常还被 catch 吞掉 —— 结果是自检全程的 Trace 诊断行一条都不落盘，
+           而验收脚本恰好 grep 这些行。
+           现在统一走一个句柄，FileShare.ReadWrite 让脚本可以边跑边 tail。 */
+        readonly object _logGate = new object();
+        StreamWriter _log;
+        bool _logTried;
+
+        void EnsureLog()
         {
+            if (_logTried) return;
+            _logTried = true;
             if (string.IsNullOrEmpty(_logPath)) return;
             try
             {
-                File.AppendAllText(_logPath,
-                    "[" + _clock.ElapsedMilliseconds.ToString() + "ms] " + s + "\r\n");
+                FileStream fs = new FileStream(_logPath, FileMode.Create, FileAccess.Write,
+                                               FileShare.ReadWrite);
+                _log = new StreamWriter(fs, new System.Text.UTF8Encoding(false));
+                _log.AutoFlush = true;
             }
-            catch { }
+            catch { _log = null; }
+        }
+
+        void Trace(string s)
+        {
+            EnsureLog();
+            if (_log == null) return;
+            /* Trace 会被媒体线程、歌词线程、中转站校验线程同时调，句柄必须串行化 */
+            lock (_logGate)
+            {
+                try { _log.WriteLine("[" + _clock.ElapsedMilliseconds.ToString() + "ms] " + s); }
+                catch { }
+            }
+        }
+
+        void CloseLog()
+        {
+            lock (_logGate)
+            {
+                if (_log == null) return;
+                try { _log.Flush(); _log.Close(); } catch { }
+                _log = null;
+            }
         }
 
         /* 命中判定的全部输入项，用来把「点不到」定位到具体哪一项不对 */
@@ -2324,13 +2455,12 @@ namespace WinIsland
             _ballOn = true;
             _ballUntil = DateTime.UtcNow.AddMilliseconds(NotifyBallMs);
 
-            /* 微信绿 / QQ 蓝。球上写字而不是画图标：外挂图标要额外的文件，
-               而这里只要用户一眼分清是哪个应用。 */
+            /* 圆心继续保留应用色，图标透明处会透出对应颜色。 */
             /* 分裂阶段用岛体自己的材质，这样它出来的时候跟岛是一个东西，
                不会有"贴了块色块"的割裂感。
 
                关键：玻璃 look 的 tint 几乎是透明的，岛之所以看着像玻璃是因为底下
-               有**真实桌面折射**（_refract 采样 _deskBrush）。球要是只套 tint，
+               有**真实桌面折射**（_deskBrush 采样屏幕）。球要是只套 tint，
                在玻璃外观下基本看不见。所以这里给球也接同一张桌面图，只是 viewbox
                取到球所在的那一小块 —— 「材质跟场景同步」就是字面意思。 */
             Look lk = Look.ByKey(_lookKey);
@@ -2363,6 +2493,7 @@ namespace WinIsland
             _ballColor.Background = null;
             _ballColor.Opacity = 0;
             _ballCore.Fill = _ballBrush;
+            _ballIcon.Source = NotifyIcon(app);
 
             PlaceBall();
             _ball.Visibility = Visibility.Visible;
@@ -2374,6 +2505,38 @@ namespace WinIsland
             StartAnimating();
 
             Trace("ball show " + app + " until " + _ballUntil.ToString("HH:mm:ss"));
+        }
+
+        static BitmapSource _wechatNotifyIcon;
+        static BitmapSource _qqNotifyIcon;
+
+        static BitmapSource NotifyIcon(Notify.App app)
+        {
+            if (app == Notify.App.WeChat)
+            {
+                if (_wechatNotifyIcon == null)
+                    _wechatNotifyIcon = LoadNotifyIcon("WinIsland.wechat-notify.png");
+                return _wechatNotifyIcon;
+            }
+
+            if (_qqNotifyIcon == null)
+                _qqNotifyIcon = LoadNotifyIcon("WinIsland.qq-notify.png");
+            return _qqNotifyIcon;
+        }
+
+        static BitmapSource LoadNotifyIcon(string resourceName)
+        {
+            using (Stream stream = typeof(IslandWindow).Assembly.GetManifestResourceStream(resourceName))
+            {
+                if (stream == null) return null;
+                BitmapImage image = new BitmapImage();
+                image.BeginInit();
+                image.CacheOption = BitmapCacheOption.OnLoad;
+                image.StreamSource = stream;
+                image.EndInit();
+                image.Freeze();
+                return image;
+            }
         }
 
         /* 从岛体后面位移出来。
@@ -2524,6 +2687,23 @@ namespace WinIsland
                 && dipY >= by && dipY <= by + NotifyBall;
         }
 
+        /* 桌宠在胶囊外面（或者停在岛体内），两种情况下窗口默认都是穿透的，
+           所以它本来点不到 —— 鼠标会直接落到底下的桌面上。
+           这里给它圈一块自己的命中区：命中就吃掉点击去戳它，不做拖动。
+
+           注意 PetStage 里 _shell.IsHitTestVisible = false（桌宠那张 Canvas 不参与
+           WPF 命中）。这条不影响这里：命中判定靠的是**光标坐标 + 这个圆**，
+           不靠 WPF 的 hit test，所以哪怕 Shell 本身不可命中，点击照样能被判进来。
+           实测也验证过：把 Shell 保持不可命中，点桌宠依然触发 pet.poke。
+
+           _petCx/_petCy 是根坐标 DIP（见 PlacePet 的赋值处），
+           加上 Left/Top 就是屏幕 DIP，和 InBall 用的是同一套坐标系。 */
+        bool InPet(double dipX, double dipY)
+        {
+            if (!_petOn || _petStage == null) return false;
+            return PetHit.Circle(dipX, dipY, Left + _petCx, Top + _petCy, _petDia);
+        }
+
         void OnHitTick(object sender, EventArgs e)
         {
             /* 先兜底：物理左键已经松开但我们没收到 MouseUp（在窗外松手、
@@ -2552,6 +2732,7 @@ namespace WinIsland
 
             double w = IslandW, h = IslandH;
             double r = Math.Min(30, h / 2);
+            double exponent = Squircle.IslandExponent(h);
             double localX = dipX - (Left + IslandLeft);
             double localY = dipY - (Top + IslandTop);
 
@@ -2562,7 +2743,7 @@ namespace WinIsland
             bool inside = localX >= -slack && localY >= -slack
                           && localX <= w + slack && localY <= h + slack
                           && Squircle.Contains(new Point(localX, localY),
-                                               w + slack * 2, h + slack * 2, r);
+                                               w + slack * 2, h + slack * 2, r, exponent);
 
             /* 外部拖放武装。
 
@@ -2583,6 +2764,9 @@ namespace WinIsland
 
             if (inside != _hover)
             {
+                /* 离开时才反应（进入已经有 expanded 那套形变了，再加表情会乱）。
+                   冷却 20 秒见 PetReactions.island.leave —— 鼠标一天进出几百次。 */
+                if (_hover && !inside) PetReact("island.leave");
                 _hover = inside;
                 Trace("hover -> " + inside + "  cursor=" + screen.X + "," + screen.Y
                       + " local=" + Math.Round(localX, 1) + "," + Math.Round(localY, 1)
@@ -2613,7 +2797,21 @@ namespace WinIsland
                穿透会让它永远点不到（这是加宽窗口之后必须跟着改的一处）。 */
             bool onBall = InBall(dipX, dipY);
 
-            bool wantIgnore = !(inside || _armOn || _dragIn || onBall);
+            /* 桌宠同理：它在岛体之外，不单独算一笔的话整块都是穿透的，戳不到。 */
+            bool onPet = InPet(dipX, dipY);
+
+            /* 鼠标进出球：只在真的跨越边界时换一次状态，不是每 tick 都设。
+               放在这里而不是挂在 MouseEnter 上，是因为桌宠那张 Canvas 不参与
+               WPF 命中（_shell.IsHitTestVisible = false），拿不到鼠标进出事件；
+               而穿透判定本来就在算「光标在不在球里」，正好是同一个判据。 */
+            if (onPet != _petHoverOn) PetHover(onPet);
+
+            /* 能戳的地方换手型，算一种「这里可以点」的提示。
+               只在值真的变了的时候写，别每 tick 都设。 */
+            System.Windows.Input.Cursor wantCursor = onPet ? System.Windows.Input.Cursors.Hand : null;
+            if (!ReferenceEquals(Cursor, wantCursor)) Cursor = wantCursor;
+
+            bool wantIgnore = !(inside || _armOn || _dragIn || onBall || onPet);
             if (wantIgnore != _ignoring) ApplyClickThrough(wantIgnore);
         }
 
@@ -2706,6 +2904,15 @@ namespace WinIsland
                 return;
             }
 
+            /* 戳桌宠：吃掉这一下，不放它下去走拖拽 ——
+               否则在球上一按，整个岛就跟着鼠标跑了。 */
+            if (InPet(scr.X / _dpi, scr.Y / _dpi))
+            {
+                PetReact("pet.poke");
+                e.Handled = true;
+                return;
+            }
+
             _dragging = true;
             _dragMoved = false;
             _dragSawMove = false;
@@ -2771,6 +2978,9 @@ namespace WinIsland
 
             if (_dragMoved)
             {
+                /* 真的挪了位置才晃 —— 原地按一下（只是想点开/戳）不算被拎走 */
+                PetReact("island.drag");
+
                 /* 第三层拖到贴墙就吸附：松手之后收起，第一层直接落在边上 */
                 SnapAnchorToEdge();
 
@@ -2815,6 +3025,10 @@ namespace WinIsland
         {
             if (_menuOpen) { Trace("menu already open"); return; }
 
+            /* 菜单就在球边上，抬头看一眼最自然。放在这个 guard 之后：
+               重复打开不该再反应一次。 */
+            PetReact("menu.open");
+
             try
             {
                 MenuActions a = new MenuActions();
@@ -2834,6 +3048,10 @@ namespace WinIsland
                 a.PetRandomIdle = PetRandomIdle;
                 a.PetState = PetSetState;
                 a.PetClip = PetPlayClip;
+
+                /* 天气：走卡片上同一套动作，免得「菜单里能选城市、卡片上不行」 */
+                a.WeatherCity = Actions().PickCity;
+                a.RefreshWeather = Actions().RefreshWeather;
 
                 /* 勾选态和动作必须用同一时刻的状态。PetStateKey() 会把 _petOn
                    跟 PetController.IsOn 对齐（它是有副作用的），所以必须在
@@ -2894,7 +3112,14 @@ namespace WinIsland
         {
             e.Handled = true;
 
-            int now = Environment.TickCount;
+            /* 时基用 _clock（Stopwatch），不要用 Environment.TickCount。
+
+               TickCount 是 Int32，约 24.9 天回绕成负数；而 _wheelLockMs 初值 0、
+               又只在通过检查之后才被赋值，于是回绕后 `now < lock` 恒为真，
+               滚轮切场景会**永久失效**，直到 TickCount 重新爬回正数（再等 24.9 天）。
+               同一份代码里 Layout.cs 用的是 `now - lastMs < 300`（差值比较，对回绕
+               免疫）——两套写法并存本身就是隐患，这里统一到单调时钟。 */
+            long now = (long)_clock.Elapsed.TotalMilliseconds;
             if (now < _wheelLockMs) return;
 
             _wheelAcc += e.Delta;
@@ -2926,9 +3151,11 @@ namespace WinIsland
         DispatcherTimer _dataTimer;
         int _lastTimerMs = -1;
 
-        /* 滚轮切场景：累计 delta + 翻页后短暂锁定，避免触控板惯性连翻 */
+        /* 滚轮切场景：累计 delta + 翻页后短暂锁定，避免触控板惯性连翻。
+           锁定时刻是 _clock 的毫秒（long），不是 Environment.TickCount ——
+           后者 Int32 会在 24.9 天回绕成负数，导致锁定判断恒真、滚轮彻底失效。 */
         int _wheelAcc;
-        int _wheelLockMs;
+        long _wheelLockMs;
 
         CardActions Actions()
         {
@@ -3017,7 +3244,11 @@ namespace WinIsland
             _acts.TransferMenu = delegate(string path) { OpenTransferMenu(path); };
             _acts.ToggleTodo = delegate(int i)
             {
+                /* 先记原状态再翻：Toggle 之后 index 指向的可能已经是另一条（Save 会重排），
+                   拿「翻之前是不是没勾」来判断方向才可靠。取消勾选不庆祝。 */
+                bool wasDone = Todos.IsDone(i);
                 Todos.Toggle(i);
+                if (!wasDone && Todos.IsDone(i)) PetReact("todo.done");
                 Trace("act todo toggle " + i + " -> " + Todos.CountText());
                 RefreshNow();
             };
@@ -3029,7 +3260,11 @@ namespace WinIsland
                 TodoInput.Open(this, screen, Look.ByKey(_lookKey), Art.ByKey(_artKey),
                     delegate(string text, int dueMinutes)
                     {
+                        /* Todos.Add 会静默去重（同文本不重复加），所以靠条数变化判断
+                           「真的加进去了」，没加就别反应 —— 否则重复添加也会点头。 */
+                        int before = Todos.Items().Length;
                         Todos.Add(text, dueMinutes);
+                        if (Todos.Items().Length > before) PetReact("todo.add");
                         Trace("act todo add " + text.Length + " chars due=" + dueMinutes
                               + "min -> " + Todos.CountText());
                         RefreshNow();
@@ -3041,6 +3276,26 @@ namespace WinIsland
                 Todos.ClearDone();
                 Trace("act todo clear done -> " + Todos.CountText());
                 RefreshNow();
+            };
+            _acts.RefreshWeather = delegate
+            {
+                Weather.Refresh();
+                Trace("act weather refresh");
+                RefreshNow();
+            };
+            _acts.PickCity = delegate
+            {
+                Rect screen = IslandScreenRect();
+                CityInput.Open(this, screen, Look.ByKey(_lookKey), Art.ByKey(_artKey),
+                    Weather.City,
+                    delegate(string city)
+                    {
+                        /* 空 = 回到自动定位。这一句本身就是合法的操作，不是取消。 */
+                        Weather.SetCity(city);
+                        Trace("act weather city -> '" + city + "'");
+                        RefreshNow();
+                    });
+                Trace("act weather city input opened");
             };
             return _acts;
         }
@@ -3172,6 +3427,8 @@ namespace WinIsland
                     _snap.TimerLeft = 0;
                     _snap.TimerRunning = false;
                     Trace("timer finished");
+                    /* 收工庆祝：桌宠转一圈。这是四个反应里情绪最强的一个 */
+                    PetReact("timer.done");
                 }
             }
         }
@@ -3180,6 +3437,36 @@ namespace WinIsland
         {
             if (_built == null) return;
             _built.Refresh(_snap);
+        }
+
+        /* 天气快照。后台线程只写 Weather 自己的状态，这里把副本装进 _snap ——
+           和 PollMedia 把媒体装进 _snap.Media 是同一个分工。 */
+        void PollWeather()
+        {
+            _snap.Wx = Weather.Current();
+        }
+
+        /* 天气数据到货（或彻底丢光）时，第一层要重画一次。
+
+           判据是两条，缺一不可：
+             · 宽度变了（52 ↔ 82）—— 数据从无到有；
+             · 或者内容该变了 —— 「有数据」但当初那版是按「没数据」画的。
+           第二条是启动时的空窗：缓存 117ms 就读完了、Weather.Ready 立刻为真，
+           而 _snap 要等第一个 400ms tick 才填。中间那次 SetState 就会画出
+           82 宽、只有一颗居中球的岛，而且宽度已经对了，只比宽度永远修不回来。
+
+           为什么是 SetState(immediate) 而不是自己 Aim：SetState 里那一串
+           （Aim + morph 记账 + Rebuild + Apply + 桌宠跟位）每一步都是接第一层
+           必须做的，自己抄一半就会漏。这里只在**真的不一样**的时候触发一次，
+           所以不会每 400ms 抖一下。 */
+        void SyncIdleWeatherWidth()
+        {
+            if (_pinnedState || _state != "idle") return;
+            double want = Weather.Ready ? Scenes.IdleWeatherW : Scenes.IdleW;
+            bool needRedraw = Math.Abs(want - _idleW) >= 0.5
+                              || _snap.WxHas != _idleHasWx;
+            if (!needRedraw) return;
+            SetState("idle", true);
         }
 
         void StartData()
@@ -3192,6 +3479,20 @@ namespace WinIsland
             Todos.Start();
             /* 中转站：读盘 + 起后台校验线程（源文件可能已经被删/移走） */
             Transfer.Start();
+
+            /* 天气：读缓存 + 起后台抓取线程。网络动作全在它自己的线程上，
+               UI 线程只读快照 —— 和 Media 完全同一个分工。 */
+            Weather.Diag = delegate(string s) { Trace(s); };
+            Weather.Start();
+
+            /* 立刻同步一次快照。Start() 里缓存是同步读的（117ms 就有数了），
+               所以这一行之后 _snap.WxHas 就是对的 —— 后面任何一次 SetState
+               建第一层，都会按「有天气」画。
+               不补这一行，第一层会先按「没天气」建一次，然后卡在那儿：
+               宽度已经跟着 Weather.Ready 变成 82 了，只比宽度的同步逻辑
+               看不出内容还是错的（温度要等一次无关的状态切换才出现）。 */
+            PollWeather();
+
             PollMedia();
             _lastTimerMs = Environment.TickCount;
 
@@ -3200,9 +3501,11 @@ namespace WinIsland
             _dataTimer.Tick += delegate
             {
                 PollMedia();
+                PollWeather();
                 DrainMediaTrace();
                 TickTimer();
                 TickTodoDue();
+                SyncIdleWeatherWidth();
                 RefreshNow();
                 /* 音乐出现/消失要能自动换层，否则「有歌就变成第二层」这条就不成立 */
                 Reconcile();
@@ -3265,6 +3568,10 @@ namespace WinIsland
             if (key == _scene) return;
             _scene = key;
 
+            /* 换场景 = 换了一张卡，转头看一下新东西。冷却偏长（见配方表）：
+               自动状态机也会走这里，挂太灵敏就一直在扭头。 */
+            PetReact("scene.change");
+
             SyncWindowSize();
 
             double nw, nh;
@@ -3311,24 +3618,21 @@ namespace WinIsland
         /* -------------------------------------------------------------- 自检 */
         async Task RunSelfTest()
         {
-            TextWriter log = null;
-            try
-            {
-                if (!string.IsNullOrEmpty(_logPath))
-                {
-                    log = new StreamWriter(_logPath, false, System.Text.Encoding.UTF8);
-                }
-            }
-            catch { log = null; }
-
+            /* 日志走 Trace 那一个句柄（见 Trace 的注释：两个写者会撞共享冲突，
+               后果是自检的诊断行全被吞掉）。W 负责「同时进日志和控制台」。 */
+            EnsureLog();
+            int bad = 0;
             Action<string> W = delegate(string s)
             {
-                if (log != null) { log.WriteLine(s); log.Flush(); }
+                Trace(s);
                 Console.WriteLine(s);
             };
 
             W("SELFTEST begin dpi=" + _dpi.ToString("0.###"));
             W("SCREEN " + Native.ScreenWidth + "x" + Native.ScreenHeight);
+            /* 自检写的是隔离目录，不是用户的 %APPDATA% —— 见 Program.cs 里
+               AppDir.SetRoot 那一段。把路径打出来，读日志的人才知道数据落在哪。 */
+            W("DATA sandbox=" + AppDir.Root);
 
             /* 自检期间关掉自动状态机（Reconcile）。
 
@@ -3504,6 +3808,26 @@ namespace WinIsland
                   + Media.LyricSource() + " v=" + Media.LyricVersion()
                   + " now='" + Media.LyricLine(np.Position) + "'");
 
+                /* 天气：网络取数比读本机状态慢，等一会儿再判。
+                   「没数据」和「代码坏了」必须分得开 —— 所以 err 一起打出来。 */
+                WeatherNow wxNow = Weather.Current();
+                for (int i = 0; i < 60 && !wxNow.Has; i++)
+                {
+                    await Task.Delay(100);
+                    wxNow = Weather.Current();
+                }
+                W("DATA weather has=" + wxNow.Has
+                  + " place='" + wxNow.Place + "'"
+                  + " temp=" + Math.Round(wxNow.Temp, 1)
+                  + " code=" + wxNow.Code
+                  + " desc='" + wxNow.Describe + "'"
+                  + " feels=" + (wxNow.HasFeels ? Math.Round(wxNow.Feels, 1).ToString() : "none")
+                  + " hum=" + (wxNow.HasHumidity ? wxNow.Humidity.ToString() : "none")
+                  + " days=" + wxNow.Days.Count
+                  + " auto=" + wxNow.Auto
+                  + " city='" + Weather.City + "'"
+                  + " err='" + Weather.LastError + "'");
+
                 /* 结构验证：真把展开媒体卡建出来，把里面所有文字抖出来。
                    「数据层有歌词」和「界面上真画了歌词」是两件事，
                    只盯 DATA 行会漏掉后者。 */
@@ -3545,12 +3869,50 @@ namespace WinIsland
                 {
                     CardActions ca = Actions();
                     W("DATA stores clips=" + Clips.Count() + " todos=" + Todos.CountText());
+
                     /* 自检不弹输入窗（那会抢焦点），直接走数据层：
-                       验的是「写入 -> 持久化 -> 列表重建」这条链 */
+                       验的是「写入 -> 持久化 -> 列表重建」这条链。
+
+                       这里必须真断言，不能「调过了就算过」：
+                       · Isolate 之后每次跑都是空目录，所以 before/after 是确定的；
+                       · Todos.Add 对同文本静默去重（Store.cs），以前不加断言，
+                         第二次起 Add 变成空操作、日志照样打印、照样 SELFTEST OK。 */
+                    int todoBefore = Todos.Items().Length;
                     Todos.Add("自检：15 分钟后到点", 15);
+                    int todoAfter = Todos.Items().Length;
                     W("DATA after addTodo todos=" + Todos.CountText());
+                    if (todoAfter == todoBefore + 1)
+                        W("ASSERT addTodo ok " + todoBefore + " -> " + todoAfter);
+                    else
+                    {
+                        bad++;
+                        W("ASSERT addTodo 未生效 before=" + todoBefore + " after=" + todoAfter);
+                    }
+
+                    /* 落盘：Add 之后 todos.txt 必须真的出现，且能读回那一条。
+                       注意 Path 在这个文件里是 WPF 的 Shapes.Path，必须全限定。 */
+                    string todoFile = System.IO.Path.Combine(AppDir.Root, "todos.txt");
+                    if (System.IO.File.Exists(todoFile)
+                        && AppDir.ReadLines("todos.txt").Length == todoAfter)
+                        W("ASSERT todos.txt ok lines=" + todoAfter);
+                    else
+                    {
+                        bad++;
+                        W("ASSERT todos.txt 缺失或行数不符 exists="
+                          + System.IO.File.Exists(todoFile) + " want=" + todoAfter);
+                    }
+
+                    /* 勾第 0 条：隔离目录里它就是刚加的那条，不会碰到用户的真数据 */
+                    string countBefore = Todos.CountText();
                     if (Todos.Items().Length > 0 && ca.ToggleTodo != null) ca.ToggleTodo(0);
                     W("DATA after toggle[0] todos=" + Todos.CountText());
+                    if (Todos.CountText() != countBefore)
+                        W("ASSERT toggle ok " + countBefore + " -> " + Todos.CountText());
+                    else
+                    {
+                        bad++;
+                        W("ASSERT toggle 未生效 " + countBefore);
+                    }
 
                     SceneDef sd2 = Scenes.Get("todo");
                     Built bt = Layout.Build("todo", "expanded", sd2.ExpW, sd2.ExpH,
@@ -3563,6 +3925,178 @@ namespace WinIsland
                         W("DATA todo-after text[" + i + "]='" + t3[i] + "'");
                 }
                 catch (Exception ex) { W("DATA act ERR " + ex.GetType().Name + ": " + ex.Message); }
+
+                /* ── 待办塔：物理、勾选、两种视图、空列表、到点提醒 ──────
+                   这一段验的是「参考实现真的接进来了」，数据层的断言在上面那段
+                   已经有了。这里造几条待办，把待办页真的搭出来，然后：
+
+                     · 塔必须是搭出来的（Built.Extra 拿得到，纸片数对得上）；
+                     · 一摞纸片**落定**在房间里，没有非有限值、没有飘出去；
+                     · 抽走最下面那张 → 上面那些真的掉下来（高度差是一张卡）；
+                     · 数据同步：被抽走的那条变成已完成；
+                     · 「已完成」视图也是一座塔，条目数对得上；
+                     · 清空已完成之后是空列表，并且有那句提示；
+                     · 到点提醒：给一条已经到点的待办，横幅和 TakeDue 都要回应。 */
+                try
+                {
+                    Todos.Add("自检：回 Nadia");
+                    Todos.Add("自检：续域名");
+                    Todos.Add("自检：订机票");
+                    Todos.AddWithDue("自检：已经到点的这条", DateTime.Now.AddMinutes(-2));
+
+                    SceneDef sdt = Scenes.Get("todo");
+                    Built btw = Layout.Build("todo", "expanded", sdt.ExpW, sdt.ExpH,
+                                             Look.ByKey(_lookKey), Art.ByKey(_artKey),
+                                             _snap, Actions(), false);
+                    btw.Refresh(_snap);
+
+                    TodoTower tw = btw.Extra as TodoTower;
+                    W("DATA tower built " + (tw == null ? "MISSING" : tw.Describe()));
+                    if (tw == null)
+                    {
+                        bad++;
+                        W("ASSERT 待办页没有接上待办塔（Built.Extra 为空）");
+                    }
+                    else
+                    {
+                        /* 文字真的在树里：纸片不是一块空面板 */
+                        List<string> tt = new List<string>();
+                        CollectTexts(btw.Root, tt);
+                        bool sawTodo = false, sawDueBanner = false;
+                        for (int i = 0; i < tt.Count; i++)
+                        {
+                            if (tt[i] != null && tt[i].IndexOf("自检：回 Nadia") >= 0) sawTodo = true;
+                            if (tt[i] != null && tt[i].IndexOf("到点：") >= 0) sawDueBanner = true;
+                        }
+                        W("DATA tower texts=" + tt.Count + " todo=" + sawTodo + " dueBanner=" + sawDueBanner);
+                        if (!sawTodo) { bad++; W("ASSERT 待办塔里看不到那条待办"); }
+                        if (!sawDueBanner) { bad++; W("ASSERT 到点横幅没出现"); }
+
+                        /* 到点提醒这条链：TakeDue 必须认得那条已经到点的 */
+                        TodoItem dueHit = Todos.TakeDue();
+                        W("DATA tower due=" + (dueHit == null ? "none" : dueHit.Text));
+                        if (dueHit == null) { bad++; W("ASSERT TakeDue 没认出已经到点的待办"); }
+
+                        /* 落定：一摞纸片都在房间里 */
+                        string settle = tw.SettleNow();
+                        int cardsBefore = tw.CardCount;
+                        W("DATA tower settled cards=" + cardsBefore + " err='" + settle + "'");
+                        if (settle.Length > 0) { bad++; W("ASSERT 落定后纸片状态异常：" + settle); }
+                        if (cardsBefore < 2) { bad++; W("ASSERT 塔上纸片太少 cards=" + cardsBefore); }
+
+                        /* ── 拖拽：端起一张、挪走、松手 ──────────────────────────────
+                           走的是鼠标事件里那套状态机本身（GrabSlot →
+                           MoveGripAt → EndGrip），只是指针坐标是合成的。
+                           要证明的三件事：拿起来了、数据没被动过、松手之后
+                           纸片还在房间里（不能丢卡）。 */
+                        int dragCards = tw.CardCount;
+                        string dragTodos = Todos.CountText();
+                        double roomW = tw.RoomWidth, roomH = tw.RoomHeight;
+                        bool grabbed = tw.GrabSlot(0, roomW / 2, roomH - 30);
+                        /* 只动 2px 不该拿起来：那是「点了一下」 */
+                        tw.MoveGripAt(roomW / 2 + 2, roomH - 28);
+                        bool idleHand = tw.HandVisible;
+                        /* 再动一大段，这才真的端起来 */
+                        tw.MoveGripAt(roomW / 2 + 70, roomH - 90);
+                        bool liveHand = tw.HandVisible;
+                        tw.SettleStepForTest(90);
+                        string dragDesc = tw.Describe();
+                        tw.EndGrip(true);
+                        bool releasedHand = tw.HandVisible;
+                        string dragErr = tw.SettleNow();
+
+                        W("DATA tower drag grabbed=" + grabbed + " idle=" + idleHand
+                          + " live=" + liveHand + " released=" + releasedHand
+                          + " cards=" + tw.CardCount + " err='" + dragErr + "'");
+                        W("DATA tower drag state " + dragDesc);
+
+                        if (!grabbed) { bad++; W("ASSERT 拖拽没抓住纸片"); }
+                        if (idleHand)
+                        {
+                            bad++;
+                            W("ASSERT 只移动 2px 就把纸片端起来了（轻点不该触发拖拽）");
+                        }
+                        if (!liveHand) { bad++; W("ASSERT 移动 70px 之后纸片没被端起"); }
+                        if (releasedHand) { bad++; W("ASSERT 松手后手里还抓着东西"); }
+                        if (tw.CardCount != dragCards)
+                        {
+                            bad++;
+                            W("ASSERT 拖拽过程中纸片丢了 " + dragCards + " -> " + tw.CardCount);
+                        }
+                        if (Todos.CountText() != dragTodos)
+                        {
+                            bad++;
+                            W("ASSERT 拖拽改动了数据 " + dragTodos + " -> " + Todos.CountText());
+                        }
+                        if (dragErr.Length > 0) { bad++; W("ASSERT 拖拽后纸片状态异常：" + dragErr); }
+
+                        /* 抽走最下面那张：上面的必须掉下来，数据必须同步 */
+                        double topBefore = tw.HighestTop();
+                        string countBefore2 = Todos.CountText();
+                        bool struck = tw.StrikeForTest(cardsBefore - 1);
+                        btw.Refresh(_snap);
+                        string settle2 = tw.SettleNow();
+                        double topAfter = tw.HighestTop();
+                        double drop = topBefore - topAfter;
+                        W("DATA tower strike ok=" + struck + " cards " + cardsBefore + " -> " + tw.CardCount
+                          + " topDrop=" + Round(drop) + " err='" + settle2 + "' todos "
+                          + countBefore2 + " -> " + Todos.CountText());
+
+                        if (!struck) { bad++; W("ASSERT 抽卡没生效"); }
+                        if (tw.CardCount != cardsBefore - 1)
+                        {
+                            bad++;
+                            W("ASSERT 抽卡后纸片数不对 want=" + (cardsBefore - 1)
+                              + " got=" + tw.CardCount);
+                        }
+                        if (drop < 10)
+                        {
+                            bad++;
+                            W("ASSERT 抽走下面那张之后上面的没掉下来 drop=" + Round(drop));
+                        }
+                        if (settle2.Length > 0) { bad++; W("ASSERT 抽卡后纸片状态异常：" + settle2); }
+                        if (countBefore2 == Todos.CountText())
+                        {
+                            bad++;
+                            W("ASSERT 勾选没有写进数据 " + countBefore2);
+                        }
+
+                        /* 已完成视图：同一座塔，取已完成的那几条 */
+                        tw.ToggleMode();
+                        string settle3 = tw.SettleNow();
+                        int doneWant = 0;
+                        TodoItem[] allT = Todos.Items();
+                        for (int i = 0; i < allT.Length; i++) if (allT[i].Done) doneWant++;
+                        if (doneWant > TodoTower.Capacity) doneWant = TodoTower.Capacity;
+                        W("DATA tower done-view mode=" + tw.DoneMode + " cards=" + tw.CardCount
+                          + " want=" + doneWant + " err='" + settle3 + "'");
+                        if (tw.CardCount != doneWant)
+                        {
+                            bad++;
+                            W("ASSERT 已完成视图条目数不对 want=" + doneWant + " got=" + tw.CardCount);
+                        }
+                        if (settle3.Length > 0) { bad++; W("ASSERT 已完成视图落定异常：" + settle3); }
+
+                        /* 空列表：清空已完成，已完成视图应当空了，并且有一句提示。
+                           视图停在「已完成」不动 —— 清空之后这一摞本来就该是空的。 */
+                        Todos.ClearDone();
+                        btw.Refresh(_snap);
+                        string settle4 = tw.SettleNow();
+                        List<string> tEmpty = new List<string>();
+                        CollectTexts(btw.Root, tEmpty);
+                        bool sawEmptyHint = false;
+                        for (int i = 0; i < tEmpty.Count; i++)
+                            if (tEmpty[i] != null && tEmpty[i].IndexOf("还没有完成") >= 0) sawEmptyHint = true;
+                        W("DATA tower empty cards=" + tw.CardCount + " hint=" + sawEmptyHint
+                          + " err='" + settle4 + "'");
+                        if (tw.CardCount != 0) { bad++; W("ASSERT 清空后已完成视图还有纸片"); }
+                        if (!sawEmptyHint) { bad++; W("ASSERT 空列表没有提示"); }
+                        if (settle4.Length > 0) { bad++; W("ASSERT 空列表落定异常：" + settle4); }
+
+                        btw.Halt();
+                    }
+                }
+                catch (Exception ex) { bad++; W("DATA tower ERR " + ex.GetType().Name + ": " + ex.Message); }
 
                 /* 番茄钟的开始按钮：点下去之后图标必须从 ▶(E768) 变成 ⏸(E769)。
                    以前这个图标只在构建时取一次，RefreshNow() 不重建树，
@@ -3707,9 +4241,18 @@ namespace WinIsland
             }
             catch (Exception ex) { W("DATA media ERR " + ex.GetType().Name + ": " + ex.Message); }
 
-            W("SELFTEST OK");
+            /* 只有断言全过才报 OK。以前无条件打印 "SELFTEST OK"，
+               于是「加待办没生效」「todos.txt 没落盘」这种情况也是绿的。 */
+            if (bad == 0) W("SELFTEST OK");
+            else
+            {
+                W("SELFTEST FAILED asserts=" + bad);
+                Environment.ExitCode = 1;
+            }
 
-            if (log != null) { log.Flush(); log.Close(); }
+            /* 日志句柄不在这里关：下面 BeginShutdown 还会走 Application.Exit，
+               那条路上还要写 "application exit" / "dispatcher shutdown started"。
+               句柄由 Exit 事件的收尾统一关（见构造函数）。 */
             BeginShutdown();
         }
 
@@ -3720,18 +4263,95 @@ namespace WinIsland
 
         void BeginShutdown()
         {
-            if (_closing) return;
+            if (_closing)
+            {
+                /* 又点了一次「退出」= 上一次没退干净。不再重走优雅路径：
+                   用户点的是退出，不该点第二次才生效。 */
+                Trace("shutdown already started -> forcing process exit");
+                ForceExit();
+                return;
+            }
             _closing = true;
-            ReleasePet();
-            StopTimersForShutdown();
-            /* 退出岛必须把桌宠一起收干净：Shell 从可视树摘下来、runtime 不再推进、
-               每帧委托和三个 DispatcherTimer 都停掉。漏一样的后果是进程退不干净
-               （Rendering 是静态事件，会当 GC 根把窗口钉住）。
-               PetController 自己也挂了 Application.Exit 兜底 —— 那条覆盖
-               自检/抓帧/WDA 探针那几条直接调 Shutdown 的路；这里显式释放是为了
-               「用户点退出」这条主路径不依赖兜底。重复调用是幂等的。 */
-            PetController.Release();
-            Application.Current.Shutdown();
+
+            /* 三步清理各自 try。
+               以前这三行是裸的：任何一步抛异常，下面的 Shutdown() 就永远执行不到，
+               而 DispatcherUnhandledException 又把异常吞掉（Handled=true），
+               于是表现就是「点了退出没反应，进程还在」，日志里还一片安静。
+               清理失败不该阻止退出 —— 进程都不要了，收不干净也得走。 */
+            try { ReleasePet(); }
+            catch (Exception ex) { Trace("shutdown: release pet failed " + ex.GetType().Name + ": " + ex.Message); }
+            try { StopTimersForShutdown(); }
+            catch (Exception ex) { Trace("shutdown: stop timers failed " + ex.GetType().Name + ": " + ex.Message); }
+            try { PetController.Release(); }
+            catch (Exception ex) { Trace("shutdown: pet controller release failed " + ex.GetType().Name + ": " + ex.Message); }
+
+            /* ReleasePet 那段注释里说过：Rendering 是静态事件，会当 GC 根把窗口钉住。
+               这类钉住一旦漏掉一个，窗口会消失而进程留着 —— 所以下面还要看门狗。 */
+            try
+            {
+                if (Application.Current == null) { ForceExit(); return; }
+                Application.Current.Shutdown(Environment.ExitCode);
+            }
+            catch (Exception ex)
+            {
+                Trace("shutdown: application shutdown failed " + ex.GetType().Name + ": " + ex.Message);
+                ForceExit();
+                return;
+            }
+            ArmExitWatchdog();
+        }
+
+        /* 优雅退出发出之后，等这么久还没走就硬退。 */
+        const int ExitWatchdogMs = 2500;
+
+        /// <summary>
+        /// 退出看门狗：Shutdown() 已经发出去，但进程还活着的话，到点硬退。
+        ///
+        /// 为什么必须有这一层：`ShutdownMode` 是 `OnExplicitShutdown`，
+        /// 只要还有任意一样东西把进程钉住（残留窗口、被静态事件当根的闭包、
+        /// 第三方 hook），窗口就会消失而进程留在任务管理器里 ——
+        /// 用户看到的正是「右键退出不是真的退出，进程还在」。
+        /// 那种残留靠读代码是查不完的，而用户点「退出」的语义就是「这个进程不要了」，
+        /// 所以给优雅收尾 2.5 秒，超时就硬退。正常情况下进程早就走了，这行永远不跑。
+        /// </summary>
+        void ArmExitWatchdog()
+        {
+            System.Threading.Thread watchdog = new System.Threading.Thread(delegate()
+            {
+                try { System.Threading.Thread.Sleep(ExitWatchdogMs); }
+                catch { }
+                Trace("shutdown watchdog: still alive after " + ExitWatchdogMs + "ms -> forcing exit");
+                ForceExit();
+            });
+            /* 后台线程：正常情况下进程退它跟着没，不会自己把进程留住 */
+            watchdog.IsBackground = true;
+            watchdog.Name = "island-exit-watchdog";
+            try { watchdog.Start(); } catch { }
+        }
+
+        /// <summary>
+        /// 硬退出。先让日志落盘再走。
+        ///
+        /// 不用 <c>Application.Current.Shutdown()</c>：那条路已经被上面试过了。
+        /// <c>Environment.Exit</c> 不等待其它线程，也不能指望 Exit 事件还有机会跑，
+        /// 所以这里显式 CloseLog（它自己带锁、内部吞异常，和其它线程的 Trace 不会打架）。
+        /// </summary>
+        void ForceExit()
+        {
+            /* 顺序要紧：先写这一行，再关日志。
+               反过来（关完再 Trace）会走 EnsureLog 把文件重新打开。 */
+            Trace("force exit: terminating process now");
+            CloseLog();
+
+            /* 这里**不能**先试 Environment.Exit：实测它会卡约 4 秒才走完
+               （ExitProcess 的 DLL detach 在等 OLE 拖放 / COM 媒体会话这些组件），
+               更糟的情况是永远不返回。走到 ForceExit 的前提就是「优雅退出已经失败」，
+               所以直接内核级终止，不给会卡的调用再开一次口。
+               不跑清理是这一刀的代价，但用户要的是「进程真的没了」。 */
+            Native.TerminateSelf(Environment.ExitCode);
+
+            /* 只有 p/invoke 失败才会走到这里（权限/异常），当兜底。 */
+            Environment.Exit(Environment.ExitCode);
         }
     }
 }

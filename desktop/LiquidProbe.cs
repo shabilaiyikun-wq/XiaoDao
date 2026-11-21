@@ -79,6 +79,12 @@ namespace WinIsland
 
             bool ok = fails.Count == 0;
             report.AppendLine();
+            /* 把「跑了多少条断言」也写进结论。
+
+               这是为了堵住假绿：S1 的缠绕方向断言曾经因为 `s` 恒为 null 而
+               一条都没执行过，报告却照样写「全部断言通过」。以后任何一段
+               断言被整体跳过，这条计数会先露馅。 */
+            report.AppendLine("断言执行 " + _checks + " 条，失败 " + fails.Count + " 条");
             report.AppendLine(ok
                 ? "结论: 全部断言通过"
                 : ("结论: " + fails.Count + " 条断言失败"));
@@ -106,13 +112,19 @@ namespace WinIsland
 
         /* ------------------------------------------------------------ 断言 */
 
+        /* 执行过的断言条数。用途见结论行那里的注释：断言被整段跳过时，
+           失败数是 0，但条数会明显少于预期。 */
+        static int _checks;
+
         static void Check(List<string> fails, bool cond, string what)
         {
+            _checks++;
             if (!cond) fails.Add(what);
         }
 
         static void CheckNear(List<string> fails, double got, double want, double tol, string what)
         {
+            _checks++;
             if (double.IsNaN(got) || Math.Abs(got - want) > tol)
                 fails.Add(what + " (got " + F(got) + ", want " + F(want) + " +/-" + F(tol) + ")");
         }
@@ -136,12 +148,22 @@ namespace WinIsland
             LiquidBody a = new LiquidBody("a", 0, 0, 20);
             BridgeShape s;
 
+            /* 近距用例的形状单独留一份。
+
+               下面三条「不应该产出颈部」的用例会把 s 置成 null（TryBridge 失败时
+               shape = null），所以到缠绕方向那一段时 s 必然是 null —— 原来的
+               `if (s != null)` 因此恒假，两条断言从来没执行过，而报告仍然写
+               「全部断言通过」。方向错了 nonzero 填充会在颈中间挖个洞，
+               偏偏是最难自查的一环，所以断言必须挂在这个真的产出颈部的形状上。 */
+            BridgeShape neck = null;
+
             /* 近距离 → 有颈 */
             bool near = LiquidGeometry.TryBridge(a, new LiquidBody("b", 45, 0, 20), 0.5,
                 LiquidGeometry.DefaultHandle, LiquidGeometry.DefaultReach, out s);
             Check(fails, near, "S1 近距两圆应当产出颈部");
             if (near)
             {
+                neck = s;
                 Check(fails, s.Finite(), "S1 颈部形状含 NaN");
                 Check(fails, s.NeckWidth > 0, "S1 近距颈宽应当为正");
                 r.AppendLine("     近距(d=45) 颈宽 = " + F(s.NeckWidth) + " DIP");
@@ -171,15 +193,21 @@ namespace WinIsland
                  · BridgeNeedsReverse 恰好在这个符号上触发（归一化接对了线）。
                真正的「不挖洞」由下面那条 nonzero 并集断言负责 —— 那才是用户
                能看见的东西。 */
-            if (s != null)
+            if (neck != null)
             {
-                double area = LiquidGeometry.SignedArea(new Point[] { s.P1, s.P3, s.P4, s.P2 });
+                double area = LiquidGeometry.SignedArea(new Point[] { neck.P1, neck.P3, neck.P4, neck.P2 });
                 Check(fails, Math.Abs(area) > 1.0,
                       "S1 颈部轮廓面积不应为 0（四点没成环）");
-                Check(fails, LiquidGeometry.BridgeNeedsReverse(s) == (area < 0),
+                Check(fails, LiquidGeometry.BridgeNeedsReverse(neck) == (area < 0),
                       "S1 缠绕方向归一化应当与鞋带面积符号一致");
                 r.AppendLine("     缠绕面积 = " + F(area)
                              + "（负 = 与圆盘反向，AppendBridge 会自动反向）");
+            }
+            else
+            {
+                /* 近距都没产出颈部的话上面已经记过失败了；这里再明确记一条，
+                   免得「没形状 → 整段跳过」又被当成通过。 */
+                fails.Add("S1 近距用例没有形状，缠绕方向断言无法执行");
             }
 
             /* 并集无洞：体和颈合成一个 nonzero 几何后，两圆心连线上的点必须都在里面。

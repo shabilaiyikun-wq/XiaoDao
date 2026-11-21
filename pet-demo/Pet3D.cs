@@ -115,10 +115,13 @@ namespace WinIsland
         /// 约 0.53，同样的 0.20 宽在那里只投影出 0.105。这是几何的结果，
         /// 不是又乘了一次缩放系数。
         /// </summary>
-        static MeshGeometry3D EyeMesh(double centerX, double centerY,
-                                      double width, double height, double tilt)
+        public static MeshGeometry3D EyeMesh(double centerX, double centerY,
+                                      double width, double height, double tilt,
+                                      double bend = 0.0)
         {
-            return EyePatch(AnchorOf(centerX, centerY), width, height, tilt, 0.0);
+            /* bend 默认 0 = 胶囊：这个方法和它的调用方（探针/自检）量的是
+               「贴片在球面上的位置与大小」，和眼形无关，保持原样。 */
+            return EyePatch(AnchorOf(centerX, centerY), width, height, tilt, 0.0, bend);
         }
 
         /// <summary>正面 (x, y) → 单位球面上的点（z 取正，正面）。</summary>
@@ -189,13 +192,13 @@ namespace WinIsland
         }
 
         static MeshGeometry3D EyePatch(Point3D unitAnchor, double width, double height,
-                                        double tilt, double offsetY)
+                                        double tilt, double offsetY, double bend)
         {
             Vector3D right, up;
             EyeFrame(unitAnchor, out right, out up);
 
             MeshGeometry3D mesh = new MeshGeometry3D();
-            List<Point> boundary = EyeBoundary(0, 0, width, height, tilt);
+            List<Point> boundary = EyeBoundary(0, 0, width, height, tilt, bend);
             /* OffsetY 是表情自带的纵向微移（Curious 两眼不对称那种）。
                它作用在贴片的局部 up 方向 —— 也就是「眼睛在球面上挪一点」，
                而不是「整块贴片飘离球面」。 */
@@ -222,9 +225,25 @@ namespace WinIsland
             return mesh;
         }
 
-        static List<Point> EyeBoundary(double centerX, double centerY,
-                                       double width, double height, double tilt)
+        /* 眼睛轮廓。默认是胶囊（宽的就是横向胶囊，两段半圆 + 直边）。
+
+           拱桥形（∩）由 bend 决定：bend 的单位是「拱起幅度 / **眼宽**」，
+           正值向上拱、负值向下凹。只有 |bend| ≥ ArchBend 才换成拱形带，
+           以下一律走原来的胶囊 —— 这样 Sleepy(-.02) / Sad(-.025) /
+           Calm(±.04) / Wink(.025) 这些历史值一个像素都不会变，
+           拱形是「显式声明」出来的，不是顺带被改出来的。
+           另外要求 width > height×1.2：拱是横向的形，竖长的眼睛套上去只会变成怪东西。
+
+           public 是为了让 AnimationTests 能直接量轮廓：拱形这件事必须靠数字验，
+           靠肉眼看截图证明不了（而且这个模型的截图里根本没有 3D 内容）。 */
+        public const double ArchBend = 0.25;
+
+        public static List<Point> EyeBoundary(double centerX, double centerY,
+                                              double width, double height, double tilt, double bend)
         {
+            if (Math.Abs(bend) >= ArchBend && width > height * 1.2)
+                return EyeArch(centerX, centerY, width, height, tilt, bend);
+
             List<Point> boundary = new List<Point>();
             bool horizontal = height < width;
             double radius = Math.Min(width, height) / 2.0;
@@ -264,6 +283,53 @@ namespace WinIsland
             return boundary;
         }
 
+        /* 拱桥形眼睛（∩）：一条向上鼓起的带子。
+
+           为什么是「带子」而不是一条线：这里的眼睛是**实心贴片**（从中心点扇形三角化
+           填满整个轮廓），所以拱必须是个有厚度的闭合区域，不能是一条笔画。
+
+           rise 按**眼宽**算，不按眼高。这条是踩过坑改的：
+           Happy 的 Height 只有 0.066（单位球坐标，球半径=1），而 Width 是 0.29 ——
+           按眼高算出来的拱高在屏幕上只有 1 DIP，眼睛宽 4.9 DIP，比例 1:5，
+           看起来仍然是一根平线（「还是眯眼」就是这么来的）。
+           拱的跨度本来由宽度决定，所以幅度也该以宽度为尺。
+           顺带解决另一个隐患：Scene 里 Height 会先乘 (1-Lid)，
+           按眼高算的拱高会在眼睑压下来时一起塌掉；按宽度算就不会。
+
+           thickness 仍然按眼高算，这样眨眼（Lid→1）时拱会变细、最后收成一条线，
+           而不是在闭眼时还悬着一个不变的粗拱。
+
+           厚度往两端收窄到 30%：等厚读起来像「一根弯了的香肠」，收窄了才像一笔。
+           收到 0 会让轮廓在两端自相交，扇形三角化会在那里翻出破面。
+
+           baseY 取 -rise/2：让拱的竖直中心落在原来胶囊的位置上 ——
+           换成拱形，眼睛不会整体往上飘。 */
+        static List<Point> EyeArch(double centerX, double centerY,
+                                   double width, double height, double tilt, double bend)
+        {
+            double half = width / 2.0;
+            double rise = bend * width;
+            double baseY = -rise * 0.5;
+            double thickness = height * 0.80;
+            const int segments = 14;
+
+            List<Point> arch = new List<Point>(segments * 2 + 2);
+            for (int i = 0; i <= segments; i++)
+            {
+                double u = -1.0 + 2.0 * i / segments;
+                double y = baseY + rise * (1.0 - u * u);
+                arch.Add(RotateEyePoint(centerX + half * u, centerY + y, centerX, centerY, tilt));
+            }
+            for (int i = segments; i >= 0; i--)
+            {
+                double u = -1.0 + 2.0 * i / segments;
+                double y = baseY + rise * (1.0 - u * u);
+                double t = thickness * (1.0 - 0.70 * u * u);
+                arch.Add(RotateEyePoint(centerX + half * u, centerY + y - t, centerX, centerY, tilt));
+            }
+            return arch;
+        }
+
         /* 防穿模。改动前是「把转幅整体乘一个系数，直到两只眼睛的边界都落在
            正面圆盘里」；现在边界的位置也跟着球面转向走了，所以判据改成
            逐点检查贴片顶点本身：投影半径 ≤ MaxEyeRadius 且 z ≥ EyeFrontZ。
@@ -297,7 +363,7 @@ namespace WinIsland
 
                 Vector3D rightAxis, upAxis;
                 EyeFrame(anchor, out rightAxis, out upAxis);
-                List<Point> boundary = EyeBoundary(0, 0, pose.Width, pose.Height, pose.Tilt);
+                List<Point> boundary = EyeBoundary(0, 0, pose.Width, pose.Height, pose.Tilt, pose.Bend);
                 double limit = MaxEyeRadius * MaxEyeRadius;
                 for (int i = 0; i < boundary.Count; i++)
                 {
@@ -339,7 +405,7 @@ namespace WinIsland
                 PetEyePose pose = side < 0 ? leftPose : rightPose;
                 Point3D anchor = EyeAnchor(side, yaw, pitch);
                 MeshGeometry3D eyeMesh = EyePatch(anchor, pose.Width, pose.Height,
-                                                  pose.Tilt, pose.OffsetY);
+                                                  pose.Tilt, pose.OffsetY, pose.Bend);
                 GeometryModel3D eye = new GeometryModel3D(eyeMesh, eyes);
                 eye.BackMaterial = eyes;
                 scene.Children.Add(eye);
