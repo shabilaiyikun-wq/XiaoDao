@@ -571,6 +571,8 @@ namespace WinIsland
             _ballIcon.HorizontalAlignment = HorizontalAlignment.Center;
             _ballIcon.VerticalAlignment = VerticalAlignment.Center;
             _ballIcon.Stretch = Stretch.Uniform;
+            _ballIcon.Clip = new EllipseGeometry(
+                new Rect(0, 0, NotifyIconSize, NotifyIconSize));
             _ballIcon.IsHitTestVisible = false;
             ballMark.Children.Add(_ballIcon);
 
