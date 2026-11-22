@@ -1,56 +1,53 @@
-# xiaodao · 原生灵动岛（样式层 + 真实数据）
+# xiaodao
 
-Windows 顶部灵动岛的原生实现，跑在真实桌面上：置顶、四角透明、岛外点击穿透、可拖动。
-样式照《Windows 灵动岛 产品文档 v0.1》§5.1 / §8.1 / §8.2 做，尺寸和时长对着条款；
-六个活动场景全部接**真实系统数据**，不是样张。
+**xiaodao** 是一款原生 Windows 桌面灵动岛。它悬浮在屏幕顶部，把系统状态和常用操作收纳在一个可展开、可拖动的胶囊界面中；项目使用 C# / WPF，并直接连接 Windows 系统数据。
 
-> 项目名 **xiaodao**　｜　位置 `E:\xiaodao`　｜　独立仓库，与 Dock（`E:\deskdock`）互不依赖。
-> 可执行文件仍叫 `WinIsland.exe`，配置目录仍是 `%APPDATA%\WinIsland`——沿用旧名是为了不丢
-> 你现有的待办、场景和位置记录。
+## 功能
 
-- **基线**：按文档条款做，44 项验收。
-- **无约束版**：放下尺寸区间与主题数量限制，只按视觉上限做一遍，13 项验收。
-- **原生程序**：同样这套样式真的浮在桌面上，79 项像素验收 + 12 项交互验收。
-- **真实功能**：媒体（SMTC）、倒计时、剪贴板历史、待办、中转站、天气（Open-Meteo + IP 定位）。
+- **媒体播放器**：读取系统媒体会话（SMTC），显示正在播放的内容并控制播放、暂停和切歌。
+- **番茄钟**：开始、暂停、重置倒计时，并支持快速增加一分钟。
+- **天气**：通过 Open-Meteo 获取天气，并按网络位置自动定位；无需 API Key。
+- **剪贴板历史**：保存近期复制内容，点击即可重新复制。
+- **待办事项**：记录待办、标记完成，并支持到时提醒。
+- **文件中转站**：暂存文件路径并支持拖放；不会复制或移动原文件。
+- **桌宠联动**：动画桌宠与灵动岛共享紧凑和展开状态。
 
-## 先看这个
+## 原生界面截图
 
-**要程序**：`desktop\build.cmd` 然后 `desktop\run.cmd`。一个 516 KB 的 exe 浮在桌面顶部，
-不依赖浏览器、不依赖 .NET SDK、不依赖任何 NuGet 包（只用 .NET Framework 4.8 自带的
-`csc.exe` + 系统自带的 WinRT 元数据）。没有音乐时它缩成一颗 52×30 的小球；
-**存到过天气就变成 82×30，球靠左、右边一个天气图标加当前温度**（没天气的那台机器上一个像素都不变）。
+以下截图来自原生程序的场景运行截图。媒体、计时器和文件名等内容是用于展示界面的示例数据。
 
-**要网页**：双击 `showcase.html` —— 不用构建、不联网、没有依赖。网页那套是纯视觉稿，
-数据是假的；**要功能只能跑 exe**。
-
-主视觉是一颗会变形的岛，浮在一张假窗口上；下面是控制条，可以现场切形态、活动、外观、取材。
-其余展区依次是：三形态几何、六场景完整版面、四种外观、圆弧与连续圆角放大对比、
-玻璃七层剖面、排版标尺与取色。
-
-`style-demo.html` 是基线演示台（含弹簧参数滑块，用来找手感）；
-`style-board.html` 是基线的静态对照板，用于评审。
-
-## 文件
-
-| 文件 | 作用 |
+| 媒体播放器 | 番茄钟 |
 | --- | --- |
-| `style-pro.css` | 无约束版全部样式：令牌、四外观、七层玻璃、场景原语、展区版式 |
-| `scenes-pro.js` | 无约束版场景：外壳生成、六类活动模板、生成式封面、图标 |
-| `showcase.html` | 无约束版主页面（弹簧形变 + 指针镜面 + 控制条 + 全部展区） |
-| `winisland.css` | 基线样式：令牌、四主题、胶囊三层质感、场景原语 |
-| `winisland-scenes.js` | 基线场景模板 + 尺寸表 + 内联图标 |
-| `style-demo.html` | 基线交互演示台 |
-| `style-board.html` | 基线静态对照板 |
-| `style-spec.md` | 规格与验收：令牌表、动效参数、移植注意点、无约束版（§9）、原生程序（§10） |
-| `desktop/` | **原生程序源码**：17 个 .cs（桌宠的 7 个在 `pet-demo/`，同一次编译）+ `build.cmd` + `run.cmd` + `verify/`（像素与交互验收脚本） |
-| `shots/` | 基线验收截图；`shots/pro/` 是 showcase 的 19 张；`shots/desktop/` 是原生 41 张 |
-| `scripts/` | 网页版验收、标定与截图脚本（依赖 `playwright` 模块 + 系统 Chrome） |
-| `notes/` | 产品文档原文、外部参考实现调研、WinRT/CoreAudio 探针源码（`notes/probes/`） |
+| ![媒体播放器原生界面](docs/images/native/media-player.png) | ![番茄钟原生界面](docs/images/native/pomodoro.png) |
+
+| 文件中转站 | 会议提醒 |
+| --- | --- |
+| ![文件中转站原生界面](docs/images/native/file-staging.png) | ![会议提醒原生界面](docs/images/native/meeting-reminder.png) |
+
+## 快速开始
+
+需要 Windows 10/11。仓库提供的构建脚本使用系统自带的 .NET Framework C# 编译器、WPF 和 WinRT 元数据，不需要 .NET SDK、MSBuild 或 NuGet。
+
+```bat
+cd desktop
+build.cmd
+run.cmd
+```
+
+`showcase.html` 是离线可打开的网页视觉演示，使用模拟数据；要体验真实系统功能，请运行原生程序。
+
+## 仓库内容
+
+- `desktop/`：原生 Windows 程序源码、构建脚本和验收脚本。
+- `pet-demo/`：与灵动岛集成的桌宠动画源码。
+- `showcase.html`、`style-demo.html`、`style-board.html`：网页视觉演示和样式评审页面。
+- `style-spec.md`：设计规格、动效参数和实现/验收记录。
+- `shots/`：设计验证与原生程序界面截图。
 
 ## 原生程序
 
 ```bat
-cd E:\xiaodao\desktop
+cd desktop
 build.cmd                                        :: 一次编译，输出 WinIsland.exe
 run.cmd                                          :: 起岛
 WinIsland.exe --selftest --log=selftest.log      :: 自检
