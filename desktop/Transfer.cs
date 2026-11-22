@@ -52,6 +52,11 @@ namespace WinIsland
         static readonly Dictionary<string, BitmapSource> _icons =
             new Dictionary<string, BitmapSource>(StringComparer.OrdinalIgnoreCase);
 
+        /* 大图标另开一张表：同一份缓存混用两种尺寸会让「哪张是 48 的」
+           变成看运气的事。键的算法见 IconKey。 */
+        static readonly Dictionary<string, BitmapSource> _iconsLarge =
+            new Dictionary<string, BitmapSource>(StringComparer.OrdinalIgnoreCase);
+
         /* 拖动正悬停在岛上。
 
            为什么放在这里而不是 Snap 里：Layout 是静态类，只拿得到 Snap 和
@@ -344,6 +349,145 @@ namespace WinIsland
                 return e == null || e.Length == 0 ? "<none>" : e.ToLower();
             }
             catch (Exception) { return "<none>"; }
+        }
+
+        /* ────────────────────────────────────────────── 大图标（桌面图标样）
+
+           中转站现在把每一项画成一个桌面图标：48px 的图标 + 下面两行名字。
+           上面那个 SHGFI_SMALLICON 是 16px —— 放大到 48 只会糊成一块色块，
+           所以大图标得另走一条路：先问 shell 要图标在系统图像列表里的**索引**
+           （SHGFI_SYSICONINDEX 拿到的索引在所有尺寸档里通用），再按档位去
+           SHGetImageList(SHIL_EXTRALARGE = 48×48) 里把那张位图取出来。
+
+           三条退路，一条都不许抛：EXTRALARGE → LARGE(32) → SMALL(16)。
+           全拿不到就返回 null，版面退回一枚字形（见 Layout.TransferCell）。
+           拿不到图标不是错误 —— 一个没装处理程序的扩展名本来就没有图标。 */
+
+        /* 按扩展名认图标对绝大多数格式是对的（同一类文件就该长一样）。
+           .exe / .lnk / .ico 例外：它们的图标是**这个文件自己的**，按扩展名
+           缓存会让所有程序都长成同一个方块。这三类按完整路径缓存，
+           并且查询时允许 shell 去读那个文件（见 LoadLargeIcon 的 exact）。 */
+        static string IconKey(string path, bool dir)
+        {
+            if (dir) return "<dir>";
+            string ext = ExtOf(path);
+            if (ext == ".exe" || ext == ".lnk" || ext == ".ico") return "&" + path;
+            return ext;
+        }
+
+        public static BitmapSource IconLarge(string path, bool dir)
+        {
+            string key = IconKey(path, dir);
+            lock (_iconsLarge)
+            {
+                BitmapSource hit;
+                if (_iconsLarge.TryGetValue(key, out hit)) return hit;
+                BitmapSource bs = LoadLargeIcon(path, dir, key);
+                _iconsLarge[key] = bs;      /* null 也缓存，免得每次重建都重试 */
+                return bs;
+            }
+        }
+
+        static BitmapSource LoadLargeIcon(string path, bool dir, string key)
+        {
+            /* exact 才走真实路径：SHGFI_USEFILEATTRIBUTES 只按扩展名查注册表，
+               完全不碰磁盘；.exe/.lnk 要拿到它自己的图标就必须让 shell 去看
+               那个文件。网络路径一律不走 exact —— 一次 IO 可能就是几十秒，
+               而这颗岛只有 468 宽。 */
+            bool exact = key.Length > 0 && key[0] == '&'
+                         && path.Length > 0 && !path.StartsWith("\\\\");
+
+            int index = ShellIconIndex(path, dir, exact);
+            if (index < 0 && exact) index = ShellIconIndex(path, dir, false);
+            if (index < 0) return Icon(path, dir);
+
+            BitmapSource big = FromImageList(index, SHIL_EXTRALARGE);
+            if (big != null) return big;
+
+            big = FromImageList(index, SHIL_LARGE);
+            if (big != null) return big;
+
+            return Icon(path, dir);
+        }
+
+        const uint SHGFI_SYSICONINDEX = 0x00004000;
+        const int SHIL_LARGE = 1;
+        const int SHIL_EXTRALARGE = 2;
+        const int ILD_TRANSPARENT = 0x1;
+
+        /* 只要索引，不要 HICON —— 取出来的索引拿去 SHGetImageList 才拿得到大图。 */
+        static int ShellIconIndex(string path, bool dir, bool exact)
+        {
+            SHFILEINFO info = new SHFILEINFO();
+            uint attr = dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+            uint flags = SHGFI_SYSICONINDEX;
+            if (!exact) flags |= SHGFI_USEFILEATTRIBUTES;
+
+            try
+            {
+                IntPtr list = SHGetFileInfo(path, attr, ref info,
+                                            (uint)Marshal.SizeOf(typeof(SHFILEINFO)), flags);
+                if (list == IntPtr.Zero) return -1;
+                return info.iIcon;
+            }
+            catch (Exception) { return -1; }
+        }
+
+        /* shell32.dll 没有公开导出的 SHGetImageList，它是序号导出 #727。
+           这在 Vista 之后一直稳定，但仍然是「没写在头文件里」的东西 ——
+           所以上面有三条退路，这里拿不到也只是少一张大图。 */
+        [DllImport("shell32.dll", EntryPoint = "#727")]
+        static extern int SHGetImageList(int iImageList, ref Guid riid, out IntPtr ppv);
+
+        /* IImageList 的方法顺序就是它的 vtable 顺序，GetIcon 在第 8 格。
+           前面七个不调用，但必须原样占位 —— 少写一个，GetIcon 就会调到别的槽上去。 */
+        [ComImport, Guid("46EB5926-582E-4017-9FDF-E8998DAA0950"),
+         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IImageList
+        {
+            [PreserveSig] int Add(IntPtr hbmImage, IntPtr hbmMask, ref int pi);
+            [PreserveSig] int ReplaceIcon(int i, IntPtr hicon, ref int pi);
+            [PreserveSig] int SetOverlayImage(int iImage, int iOverlay);
+            [PreserveSig] int Replace(int i, IntPtr hbmImage, IntPtr hbmMask);
+            [PreserveSig] int AddMasked(IntPtr hbmImage, int crMask, ref int pi);
+            [PreserveSig] int Draw(IntPtr pimldp);
+            [PreserveSig] int Remove(int i);
+            [PreserveSig] int GetIcon(int i, int flags, ref IntPtr picon);
+        }
+
+        static BitmapSource FromImageList(int index, int size)
+        {
+            IntPtr ppv = IntPtr.Zero;
+            try
+            {
+                Guid iid = typeof(IImageList).GUID;
+                if (SHGetImageList(size, ref iid, out ppv) != 0 || ppv == IntPtr.Zero) return null;
+
+                IImageList list = (IImageList)Marshal.GetTypedObjectForIUnknown(ppv, typeof(IImageList));
+                IntPtr hIcon = IntPtr.Zero;
+                if (list.GetIcon(index, ILD_TRANSPARENT, ref hIcon) != 0 || hIcon == IntPtr.Zero)
+                    return null;
+
+                try
+                {
+                    BitmapSource bs = Imaging.CreateBitmapSourceFromHIcon(
+                        hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    /* CreateBitmapSourceFromHIcon 是惰性的 —— 不 Freeze 就 DestroyIcon，
+                       拿到的是个指向已释放图标的空壳（和上面那张小图标同一个坑）。 */
+                    bs.Freeze();
+                    return bs;
+                }
+                finally { DestroyIcon(hIcon); }
+            }
+            catch (Exception) { return null; }
+            finally
+            {
+                /* RCW 自己 AddRef 过了，这里放掉的是 SHGetImageList 交出来的那一份 */
+                if (ppv != IntPtr.Zero)
+                {
+                    try { Marshal.Release(ppv); } catch (Exception) { }
+                }
+            }
         }
 
         const uint FILE_ATTRIBUTE_NORMAL = 0x80;

@@ -590,13 +590,18 @@ namespace WinIsland
             return b;
         }
 
-        /* 中转站。
+        /* 中转站。468×268。
 
-           版面故意和剪贴板页同构：表头（标题 + 数量 + 清空）+ 行列表，
-           行高 30、行距 4、最多 6 行 —— 两页放在一起切换时不会跳。
+           表头和其他页同构（标题 + 数量 + 清空 + 清理丢失），下面不是「行」，
+           而是一格一格的桌面图标：上面一个大图标、下面两行名字。
+
+           为什么不再是行：这一页的全部意义是把东西**拖出去**。行是 30 高的
+           窄条，按住往外拖得先瞄准那条缝；一格 72×102 的方靶子按住就能走。
+           图标也不再是主角旁边那 14px 的配角 —— 48px 的图标 + 两行名字是
+           资源管理器那一套，一眼认东西，不用读文件名。
 
            拖动悬停时整块换成一个大投放区，不再叠在列表上面：
-           拖到半途看见的是「松手暂存」，而不是自己的文件列表被一层虚线压住。 */
+           拖到半途看见的是「松手暂存」，而不是自己暂存的东西被一层虚线压住。 */
         static void ExpandedTransfer(Canvas root, Built built, double w, double h,
                                      Look look, Art art, Snap s, CardActions act)
         {
@@ -629,7 +634,6 @@ namespace WinIsland
             OnTap(ql, act.ClearTransferMissing, "transfer-clear-missing");
 
             double listW = w - PadExp * 2;
-            double rowH = 30;
             double listH = h - 46 - PadExp;
             Canvas list = new Canvas();
             list.Width = listW;
@@ -637,13 +641,13 @@ namespace WinIsland
             Ui.At(root, list, PadExp, 46);
 
             int ver = Transfer.Version();
-            RebuildTransferList(list, listW, listH, rowH, look, art, act);
+            RebuildTransferList(list, listW, listH, look, art, act);
             built.Live.Add(delegate(Snap n)
             {
                 int v = Transfer.Version();
                 if (v == ver) return;
                 ver = v;
-                RebuildTransferList(list, listW, listH, rowH, look, art, act);
+                RebuildTransferList(list, listW, listH, look, art, act);
                 cnt.Text = Transfer.Count() + " 项";
                 int m = Transfer.MissingCount();
                 ql.Visibility = m > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -666,8 +670,8 @@ namespace WinIsland
             return r;
         }
 
-        static void TransferZoneText(Canvas list, double listW, double listH, Look look,
-                                     string big, string tip, Color glyphColor, string glyph)
+        static void ZoneText(Canvas list, double listW, double listH, Look look,
+                             string big, string tip, Color glyphColor, string glyph)
         {
             FrameworkElement g = Ui.Glyph(glyph, 26, glyphColor);
             Ui.At(list, g, (listW - 26) / 2, listH / 2 - 30);
@@ -683,17 +687,35 @@ namespace WinIsland
             Ui.At(list, t, 0, listH / 2 + 26);
         }
 
-        static void RebuildTransferList(Canvas list, double listW, double listH, double rowH,
+        /* ── 中转站的东西画成桌面图标 ─────────────────────────────────
+
+           一格的理想宽度 / 高度。宽度是「两行名字还能读」的下限，
+           高度是「48 图标 + 两行名字 + 上下各一点空气」。
+
+           为什么按这个尺寸反算行列、而不是写死 6×2：列表区的宽高是算出来的
+           （w - 36 / h - 64），写死行列就等于把两处算式抄了一遍，改窗口尺寸
+           时它们会不同步。这里只给「一格至少多宽、一列大概多高」，由可用面积
+           反推行列 —— 于是 432×204 得到 6×2、cellW=72、cellH=102。 */
+        const double IconCellMinW = 64;
+        const double IconCellIdealH = 96;
+        const double IconGlyphSize = 48;
+        const double IconLabelH = 28;          /* 两行 11px 名字 */
+        const double IconLabelGap = 6;
+        const double IconNameRoom = 10;        /* 名字左右各让 5，避免贴到格子边 */
+
+        static void RebuildTransferList(Canvas list, double listW, double listH,
                                         Look look, Art art, CardActions act)
         {
             list.Children.Clear();
 
-            /* 拖动悬停：整块变成投放区 */
+            /* 拖动悬停：整块变成投放区。
+               不叠在图标上面 —— 拖到半途看见的是「松手暂存」，而不是自己的
+               东西被一层虚线压住。 */
             if (Transfer.Hover)
             {
                 Ui.At(list, DropZone(listW, listH, look, art, true), 0, 0);
-                TransferZoneText(list, listW, listH, look, "松手暂存", "文件不会被复制，只记路径",
-                                 Ui.AccInk(look, art), Ui.GFolder);
+                ZoneText(list, listW, listH, look, "松手暂存", "文件不会被复制，只记路径",
+                         Ui.AccInk(look, art), Ui.GFolder);
                 return;
             }
 
@@ -701,102 +723,209 @@ namespace WinIsland
             if (items.Length == 0)
             {
                 Ui.At(list, DropZone(listW, listH, look, art, false), 0, 0);
-                TransferZoneText(list, listW, listH, look, "把文件拖到这里暂存",
-                                 "支持一次拖入多个文件或文件夹", look.Ink3, Ui.GFolder);
+                ZoneText(list, listW, listH, look, "把文件拖到这里暂存",
+                         "支持一次拖入多个文件或文件夹", look.Ink3, Ui.GFolder);
                 return;
             }
 
-            int show = items.Length < 6 ? items.Length : 6;
+            int cols = (int)Math.Floor(listW / IconCellMinW);
+            if (cols < 1) cols = 1;
+            int rows = (int)Math.Round(listH / IconCellIdealH);
+            if (rows < 1) rows = 1;
+            /* 列数不随条目数缩：桌面上三个图标也是靠左上排三个 72 的格子，
+               不会把格子拉成三块 144 宽的大板。 */
+
+            double cellW = listW / cols;
+            double cellH = listH / rows;
+
+            int cap = cols * rows;
+            bool more = items.Length > cap;
+            /* 装不下就让最后一格去报数 —— 默默截断等于让用户以为东西没了 */
+            int show = more ? cap - 1 : items.Length;
+            if (show < 0) show = 0;
+
             for (int i = 0; i < show; i++)
             {
-                Transfer.View v = items[i];
-                string p = v.Path;
+                Ui.At(list, TransferCell(items[i], cellW, cellH, look, art, act),
+                      0 + (i % cols) * cellW, (i / cols) * cellH);
+            }
 
-                Border row = Row(listW, rowH);
-                /* 行的身份标记。窗口的右键 Preview 处理靠它让路给行菜单。
-                   不用 Tag —— Tag 已经被 Row() 设成 "act"（防拖窗口）。 */
-                row.Uid = "trow";
-                Canvas inner = new Canvas();
-                row.Child = inner;
-
-                /* 图标：系统图标优先，取不到退回字形。丢失项一律走灰字形，
-                   免得一个指向已删除文件的图标看起来还挺正常。 */
-                bool iconDone = false;
-                if (!v.Missing)
-                {
-                    System.Windows.Media.ImageSource ico = Transfer.Icon(p, v.Dir);
-                    if (ico != null)
-                    {
-                        Image img = new Image();
-                        img.Source = ico;
-                        img.Width = 14;
-                        img.Height = 14;
-                        RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-                        Ui.At(inner, img, 0, 8);
-                        iconDone = true;
-                    }
-                }
-                if (!iconDone) Ui.At(inner, Ui.Glyph(Ui.GFolder, 12, look.Ink3), 0, 7);
-
-                Color ink = v.Missing ? look.Ink3 : look.Ink1;
-                TextBlock tb = Ui.Text(Transfer.Name(p), 14, FontWeights.Normal, ink, false);
-                /* 右侧让出：尺寸 66 + 间隔 18 + 移除键 16 */
-                tb.Width = listW - 22 - 84;
-                tb.TextTrimming = TextTrimming.CharacterEllipsis;
-                Ui.At(inner, tb, 22, 5);
-
-                TextBlock sz = Ui.Text(v.Missing ? "文件已丢失" : v.Size,
-                                       12, FontWeights.Medium,
-                                       v.Missing ? Ui.AccInk(look, art) : look.Ink3, true);
-                sz.Width = 66;
-                sz.TextAlignment = TextAlignment.Right;
-                Ui.At(inner, sz, listW - 66 - 18, 7);
-
-                /* 悬停出现的移除键。
-
-                   标记用 Uid 而不是 Tag：OnTap 内部会把 Tag 覆写成 "act"
-                   （那是给「按住按钮不拖窗口」用的），两套标记抢同一个属性
-                   必然有一头失效。Uid 是空着的，正好用来放这个语义。 */
-                FrameworkElement del = Ui.Glyph(Ui.GClose, 11, look.Ink3);
-                del.Uid = "del";
-                del.Width = 16;
-                del.Height = 16;
-                del.Visibility = Visibility.Collapsed;
-                Ui.At(inner, del, listW - 16, 7);
-                OnTap(del, delegate { if (act.TransferRemove != null) act.TransferRemove(p); },
-                      "transfer-remove");
-
-                row.MouseEnter += delegate { del.Visibility = Visibility.Visible; };
-                row.MouseLeave += delegate { del.Visibility = Visibility.Collapsed; };
-
-                WireTransferRow(row, inner, p, v.Missing, act);
-
-                Ui.At(list, row, 0, i * (rowH + 4));
+            if (more)
+            {
+                int rest = items.Length - show;
+                Ui.At(list, TransferMore(rest, cellW, cellH, look),
+                      (show % cols) * cellW, (show / cols) * cellH);
             }
         }
 
-        /* 一行文件的三套手势：点开 / 按住拖出 / 右键菜单。
+        /* 一格：上面一个大图标，下面两行名字。
+
+           命中面是整格：按住图标、按住名字、按在格子空白处，都该能把这一项
+           拖出去。图标和文字都关掉命中测试，所以拖拽起点永远是这一格本身，
+           不会出现「按在文件名上拖不动」这种事。
+
+           选中高亮和 ✕ 都由悬停态控制：桌面上没有常驻的删除键，
+           这一格也不该有。 */
+        static FrameworkElement TransferCell(Transfer.View v, double cellW, double cellH,
+                                             Look look, Art art, CardActions act)
+        {
+            string p = v.Path;
+            Color ink = v.Missing ? Ui.AccInk(look, art) : look.Ink1;
+
+            Canvas cell = new Canvas();
+            cell.Width = cellW;
+            cell.Height = cellH;
+            /* 透明底是「能被命中」的前提：WPF 里背景为 null 的面板不参与命中测试 */
+            cell.Background = Brushes.Transparent;
+            cell.Tag = "act";                     /* 按格子不要拖动整个岛 */
+            /* 行的身份标记。窗口的右键 Preview 处理靠它让路给这一格的菜单。
+               不用 Tag —— Tag 已经被上面那行占了。 */
+            cell.Uid = "trow";
+            cell.Cursor = System.Windows.Input.Cursors.Hand;
+
+            /* 悬停的选中框：桌面图标选中是「一层薄薄的高光 + 一圈细边」。
+               常驻一条实心条会让 12 格变成 12 个方块，反而看不出是图标。 */
+            Border sel = new Border();
+            sel.Width = cellW - 2;
+            sel.Height = cellH - 2;
+            sel.CornerRadius = new CornerRadius(8);
+            sel.Background = Ui.AB(look.Ink1, 0.13);
+            sel.BorderThickness = new Thickness(1);
+            sel.BorderBrush = Ui.AB(Ui.AccInk(look, art), 0.42);
+            sel.IsHitTestVisible = false;
+            sel.Visibility = Visibility.Collapsed;
+            Ui.At(cell, sel, 1, 1);
+
+            double contentH = IconGlyphSize + IconLabelGap + IconLabelH;
+            double y0 = Math.Max(4, Math.Round((cellH - contentH) / 2));
+            double ix = Math.Round((cellW - IconGlyphSize) / 2);
+
+            /* 图标：系统给的大图标优先（Transfer.IconLarge，48px 原生），
+               取不到退回一枚字形 —— 空一格比画个错的强。 */
+            System.Windows.Media.ImageSource ico = Transfer.IconLarge(p, v.Dir);
+            if (ico != null)
+            {
+                Image img = new Image();
+                img.Source = ico;
+                img.Width = IconGlyphSize;
+                img.Height = IconGlyphSize;
+                img.Stretch = Stretch.Uniform;
+                img.IsHitTestVisible = false;
+                /* 丢失的项一律压暗：一张看着还挺正常的图标指向一个已经不存在的
+                   文件，比灰掉更容易骗人。 */
+                if (v.Missing) img.Opacity = 0.35;
+                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+                Ui.At(cell, img, ix, y0);
+            }
+            else
+            {
+                TextBlock fb = Ui.Glyph(Ui.GFolder, IconGlyphSize * 0.72,
+                                        v.Missing ? Fade(look.Ink3, 0.5) : look.Ink3);
+                fb.Width = IconGlyphSize;
+                fb.TextAlignment = TextAlignment.Center;
+                fb.IsHitTestVisible = false;
+                Ui.At(cell, fb, ix, y0 + Math.Round(IconGlyphSize * 0.14));
+            }
+
+            /* 名字：两行，居中。超长按字符截断加省略号（WPF 在 Wrap + 定高
+               时会trim最后一行），所以固定 Height 是必需的，动态高度会自己撑长。 */
+            TextBlock name = Ui.Text(Transfer.Name(p), 11, FontWeights.Normal, ink, false);
+            name.Width = cellW - IconNameRoom;
+            name.TextAlignment = TextAlignment.Center;
+            name.TextWrapping = TextWrapping.Wrap;
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            name.Height = IconLabelH;
+            name.IsHitTestVisible = false;
+            Ui.At(cell, name, IconNameRoom / 2, y0 + IconGlyphSize + IconLabelGap);
+
+            /* 悬停出现的移除键。位置贴在图标右上角 —— 桌面图标样的一格没有
+               「行尾」可以放它。
+               标记用 Uid 而不是 Tag：OnTap 内部会把 Tag 覆写成 "act"，
+               两套标记抢同一个属性必然有一头失效（见 Row() 上面的说明）。 */
+            Border del = Ui.SolidBar(16, 16, look);
+            del.CornerRadius = new CornerRadius(8);
+            del.Uid = "del";
+            del.IsHitTestVisible = true;
+            del.Visibility = Visibility.Collapsed;
+            TextBlock dg = Ui.Glyph(Ui.GClose, 9, look.Ink2);
+            dg.HorizontalAlignment = HorizontalAlignment.Center;
+            dg.VerticalAlignment = VerticalAlignment.Center;
+            dg.IsHitTestVisible = false;
+            del.Child = dg;
+            /* 贴图标右上角；y0 在卡片被压得很矮时会算出负值，夹一下别让它
+               半个身子跑到格子外面去。 */
+            Ui.At(cell, del, ix + IconGlyphSize - 11, Math.Max(2, y0 - 5));
+            OnTap(del, delegate { if (act.TransferRemove != null) act.TransferRemove(p); },
+                  "transfer-remove");
+
+            /* 悬停：选中框 + ✕。MouseEnter/Leave 用的是 IsMouseOver 的语义，
+               指针移到格子里的图标/文字上不会误触发 Leave。 */
+            cell.MouseEnter += delegate
+            {
+                sel.Visibility = Visibility.Visible;
+                del.Visibility = Visibility.Visible;
+            };
+            cell.MouseLeave += delegate
+            {
+                sel.Visibility = Visibility.Collapsed;
+                del.Visibility = Visibility.Collapsed;
+            };
+
+            WireTransferCell(cell, p, v.Missing, act);
+            return cell;
+        }
+
+        /* 装不下时的最后一格：+N。
+
+           它只报数，不接手势 —— 点它没有去处（要看全部得自己整理），
+           给一个能点但什么都不做的格子比一个明显是数字的格子更误导人。 */
+        static FrameworkElement TransferMore(int rest, double cellW, double cellH, Look look)
+        {
+            Canvas cell = new Canvas();
+            cell.Width = cellW;
+            cell.Height = cellH;
+
+            double contentH = IconGlyphSize + IconLabelGap + IconLabelH;
+            double y0 = Math.Max(4, Math.Round((cellH - contentH) / 2));
+
+            TextBlock plus = Ui.Text("+" + rest, 20, FontWeights.SemiBold, look.Ink2, true);
+            plus.Width = cellW;
+            plus.TextAlignment = TextAlignment.Center;
+            Ui.At(cell, plus, 0, y0 + Math.Round((IconGlyphSize - 26) / 2));
+
+            TextBlock tip = Ui.Text("还有 " + rest + " 项", 11, FontWeights.Normal,
+                                    look.Ink3, false);
+            tip.Width = cellW - IconNameRoom;
+            tip.TextAlignment = TextAlignment.Center;
+            Ui.At(cell, tip, IconNameRoom / 2, y0 + IconGlyphSize + IconLabelGap);
+            return cell;
+        }
+
+        /* 一格的三套手势：点开 / 按住拖出 / 右键菜单。
 
            为什么不用 OnTap：它是在 **MouseLeftButtonDown** 上触发的，
-           那样「按住行开始拖出」会在按下的瞬间先打开文件，拖放根本起不来。
-           所以这里手写 Down/Up/Move：Up 且没超过阈值才算点击。 */
-        static void WireTransferRow(Border row, Canvas inner, string path, bool missing,
-                                    CardActions act)
+           那样「按住往外拖」会在按下的瞬间先打开文件，拖放根本起不来。
+           所以这里手写 Down/Up/Move：Up 且没超过阈值才算点击。
+
+           阈值 4px 和原来一样。走的是按下点与当前点的**距离**，不是时间：
+           按住不动再拖，一样能拖出去。 */
+        static void WireTransferCell(FrameworkElement cell, string path, bool missing,
+                                     CardActions act)
         {
             bool armed = false;
             bool dragged = false;
             Point down = new Point(0, 0);
 
-            row.PreviewMouseLeftButtonDown += delegate(object s,
+            cell.PreviewMouseLeftButtonDown += delegate(object s,
                 System.Windows.Input.MouseButtonEventArgs e)
             {
                 if (IsDel(e.OriginalSource)) { armed = false; return; }
                 armed = true;
                 dragged = false;
-                down = e.GetPosition(row);
+                down = e.GetPosition(cell);
             };
 
-            row.MouseMove += delegate(object s, System.Windows.Input.MouseEventArgs e)
+            cell.MouseMove += delegate(object s, System.Windows.Input.MouseEventArgs e)
             {
                 if (!armed) return;
                 if (e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
@@ -804,7 +933,7 @@ namespace WinIsland
                     armed = false;
                     return;
                 }
-                Point p = e.GetPosition(row);
+                Point p = e.GetPosition(cell);
                 if (Math.Abs(p.X - down.X) < 4 && Math.Abs(p.Y - down.Y) < 4) return;
 
                 armed = false;
@@ -817,7 +946,7 @@ namespace WinIsland
                 if (act.TransferDragOut != null) act.TransferDragOut(path);
             };
 
-            row.MouseLeftButtonUp += delegate(object s,
+            cell.MouseLeftButtonUp += delegate(object s,
                 System.Windows.Input.MouseButtonEventArgs e)
             {
                 bool wasArmed = armed;
@@ -832,7 +961,7 @@ namespace WinIsland
                 if (act.TransferOpen != null) act.TransferOpen(path);
             };
 
-            row.MouseRightButtonUp += delegate(object s,
+            cell.MouseRightButtonUp += delegate(object s,
                 System.Windows.Input.MouseButtonEventArgs e)
             {
                 e.Handled = true;
@@ -853,6 +982,31 @@ namespace WinIsland
             return false;
         }
 
+        /* 剪贴板的版面常数。
+
+           条高 30、条距 4、最多 6 条：6*30 + 5*4 = 200，列表区正好 204 ——
+           一行都不需要滚动，也不会在底部留一条不规则的缝。
+
+           条内文字的左边界和待办纸片对齐（7 + 17 + 8 = 32）：这两页是同一种
+           数据形状（一条一条的短文本），滚轮来回切的时候字不该跳一列。 */
+        const double ClipBarH = 30;
+        const double ClipBarGap = 4;
+        const int ClipBarMax = 6;
+        const double ClipGlueX = 7;
+        const double ClipGlueBox = 17;
+        const double ClipTextX = ClipGlueX + ClipGlueBox + 8;
+
+        /* 剪贴板页。468×268。
+
+           版面：表头（标题 + 数量 + 清空）+ 一列剪贴条。
+
+           为什么每条一个条，而不是原来那一列「透明底的字」：剪贴板里最常见的是
+           一段多行的话，几行字上下叠着、间距又和条距一样时，两条长文本和
+           「一条三行的话」在视觉上分不开 —— 复制错了还得点一下才知道。
+           给它一条实心的条，边界就摆在那儿了。
+
+           材质取自 Ui.SolidBar（待办纸片用的同一块）：同一种「一条东西」
+           在这座岛上就该是同一种材质。 */
         static void ExpandedClip(Canvas root, Built built, double w, double h,
                                  Look look, Art art, Snap s, CardActions act)
         {
@@ -868,63 +1022,134 @@ namespace WinIsland
             Ui.At(root, clr, w - PadExp - 56 - 6 - 56, 13);
             OnTap(clr, act.ClearClips);
 
-            double rowH = 30;
             double listW = w - PadExp * 2;
+            double listH = h - 46 - PadExp;
             Canvas list = new Canvas();
             list.Width = listW;
-            list.Height = h - 46 - PadExp;
+            list.Height = listH;
             Ui.At(root, list, PadExp, 46);
 
             int ver = Clips.Version();
-            RebuildClipList(list, listW, rowH, look, act);
+            RebuildClipList(list, listW, listH, look, act);
             built.Live.Add(delegate(Snap n)
             {
                 int v = Clips.Version();
                 if (v == ver) return;
                 ver = v;
-                RebuildClipList(list, listW, rowH, look, act);
+                RebuildClipList(list, listW, listH, look, act);
                 cnt.Text = Clips.Count() + " 条";
             });
         }
 
-        static void RebuildClipList(Canvas list, double listW, double rowH, Look look,
+        static void RebuildClipList(Canvas list, double listW, double listH, Look look,
                                     CardActions act)
         {
             list.Children.Clear();
             string[] items = Clips.Items();
-            int show = items.Length < 6 ? items.Length : 6;
+            int show = items.Length < ClipBarMax ? items.Length : ClipBarMax;
 
             if (show == 0)
             {
-                TextBlock empty = Ui.Text("复制一段文字，就会出现在这里", 13, FontWeights.Normal,
-                    look.Ink3, false);
-                Ui.At(list, empty, 0, 4);
+                ZoneText(list, listW, listH, look, "还没有剪贴记录",
+                         "复制任何文字，就会出现在这里", Fade(look.Ink3, 0.62), Ui.GDoc);
                 return;
             }
 
+            /* 悬停时条要亮一档、右边要冒出「复制」那颗字形。两种颜色各算一次
+               就够了，不要在每次 MouseEnter 里重新 Mix。 */
+            Color hotBg = Ui.Mix(look.CardBg, look.Ink1, 0.07);
+            Color coldBg = look.CardBg;
+
             for (int i = 0; i < show; i++)
             {
-                string txt = items[i].Replace("\r", " ").Replace("\n", " ").Trim();
-                if (txt.Length > 90) txt = txt.Substring(0, 90) + "…";
+                /* 材质：和待办纸片同一块（Ui.SolidBar） */
+                Border bar = Ui.SolidBar(listW, ClipBarH, look);
+                bar.Cursor = System.Windows.Input.Cursors.Hand;
 
-                Border row = Row(listW, rowH);
                 Canvas inner = new Canvas();
-                row.Child = inner;
+                inner.Width = listW;
+                inner.Height = ClipBarH;
+                /* 身份标记（自检/验收靠它认条，不按宽度认）。
+                   挂在里层而不是条本身：OnTap 会把条换成一层命中面，
+                   Uid 跟着被复制一份，数条数就会数出一倍。 */
+                inner.Uid = "cbar";
+                bar.Child = inner;
 
-                Ui.At(inner, Ui.Glyph(Ui.GDoc, 12, look.Ink3), 0, 7);
+                TextBlock glue = Ui.Glyph(Ui.GDoc, 12, look.Ink3);
+                glue.Width = ClipGlueBox;
+                glue.TextAlignment = TextAlignment.Center;
+                glue.IsHitTestVisible = false;
+                Ui.At(inner, glue, ClipGlueX, Math.Round((ClipBarH - 16) / 2));
 
-                TextBlock tb = Ui.Text(txt, 14, FontWeights.Normal, look.Ink1, false);
-                tb.Width = listW - 22;
+                /* 右边这 22 是「复制」那颗字形的固定坑位：悬停才显示，
+                   但宽度一直占着 —— 否则鼠标一进一出，正文会重新截一次，
+                   看着像条目自己在抖。 */
+                const double tailW = 22;
+
+                TextBlock tb = Ui.Text(OneLine(items[i]), 13, FontWeights.Normal,
+                                       look.Ink1, false);
+                tb.Width = listW - ClipTextX - tailW - 10;
                 tb.TextTrimming = TextTrimming.CharacterEllipsis;
-                Ui.At(inner, tb, 22, 5);
+                tb.IsHitTestVisible = false;      /* 按在字上也算按在这条上 */
+                Ui.At(inner, tb, ClipTextX, Math.Round((ClipBarH - 18) / 2));
+
+                TextBlock copy = Ui.Glyph(Ui.GCopy, 11, Ui.Mix(look.Ink3, look.Ink1, 0.5));
+                copy.Width = 16;
+                copy.TextAlignment = TextAlignment.Center;
+                copy.IsHitTestVisible = false;
+                copy.Visibility = Visibility.Collapsed;
+                Ui.At(inner, copy, listW - tailW - 2, Math.Round((ClipBarH - 14) / 2));
+
+                /* 悬停：条亮一档 + 露出「复制」。这只是把「点一下会发生什么」
+                   提前说清楚 —— 整条本来就已经是一个按钮。 */
+                bar.MouseEnter += delegate
+                {
+                    bar.Background = Ui.Br(hotBg);
+                    copy.Visibility = Visibility.Visible;
+                };
+                bar.MouseLeave += delegate
+                {
+                    bar.Background = Ui.Br(coldBg);
+                    copy.Visibility = Visibility.Collapsed;
+                };
 
                 int idx = i;
                 /* 先 At 再 OnTap：OnTap 会给元素套一层命中面（Squish.Wrap），
                    套的时候要读它现在的父容器和 Canvas.Left/Top。顺序反过来，
                    元素还没有父容器，就套不上命中面了（见 Squish.Wrap 的退路）。 */
-                Ui.At(list, row, 0, i * rowH);
-                OnTap(row, delegate { if (act.CopyClip != null) act.CopyClip(idx); });
+                Ui.At(list, bar, 0, i * (ClipBarH + ClipBarGap));
+                OnTap(bar, delegate { if (act.CopyClip != null) act.CopyClip(idx); },
+                      "clip-" + idx);
             }
+        }
+
+        /* 一条剪贴内容压成一行。
+
+           条只有 30 高，放不下换行；多行内容在这里被折成单行（连续空白并成
+           一个空格），超出宽度的部分交给 TextTrimming 画省略号。2000 字的内容
+           也量得动（NoWrap 只量一次行宽），所以不需要在这里截断 —— 截断会
+           把「余下还有多少」这件事变得更不准确。 */
+        static string OneLine(string text)
+        {
+            if (text == null) return "";
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(text.Length);
+            bool pendingSpace = false;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (ch == '\r' || ch == '\n' || ch == '\t' || ch == ' ' || ch == '\u3000')
+                {
+                    pendingSpace = sb.Length > 0;
+                    continue;
+                }
+                if (pendingSpace)
+                {
+                    sb.Append(' ');
+                    pendingSpace = false;
+                }
+                sb.Append(ch);
+            }
+            return sb.ToString();
         }
 
         static void ExpandedTodo(Canvas root, Built built, double w, double h,

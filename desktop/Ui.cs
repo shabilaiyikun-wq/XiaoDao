@@ -28,6 +28,8 @@ namespace WinIsland
         public const string GClose = "\uE711";
         public const string GRefresh = "\uE72C";
         public const string GFolder = "\uE8B7";
+        public const string GCopy = "\uE8C8";
+        public const string GWarn = "\uE7BA";
 
         public static Color Mix(Color a, Color b, double t)
         {
@@ -221,6 +223,27 @@ namespace WinIsland
             t.VerticalAlignment = VerticalAlignment.Center;
             b.Child = t;
             b.HorizontalAlignment = HorizontalAlignment.Left;
+            return b;
+        }
+
+        /* 实心条的材质。**待办纸片用的就是这一块**，剪贴板的历史条也从这里取。
+
+           为什么必须共用一处：这一版要的是「剪贴条和待办条看起来是同一种东西」，
+           而那件事只能靠同一段代码保证。三处各抄一遍颜色，改一处漏两处的时候
+           没人看得出来，直到两页并排比较才发现材质不一样了。
+
+           为什么是实心而不是半透明薄板：叠在一起的一摞条，靠 1px 描边分辨边界；
+           半透明的底会让下面的条透上来，一摞就糊成一片。实心的靠颜色本身分辨，
+           所以圆角也要小 —— 圆角一大，一摞条会变成一串珠子。 */
+        public static Border SolidBar(double w, double h, Look look)
+        {
+            Border b = new Border();
+            b.Width = w;
+            b.Height = h;
+            b.CornerRadius = new CornerRadius(Math.Min(6, h * 0.24));
+            b.Background = new SolidColorBrush(look.CardBg);
+            b.BorderThickness = new Thickness(1);
+            b.BorderBrush = new SolidColorBrush(look.CardEdge);
             return b;
         }
 

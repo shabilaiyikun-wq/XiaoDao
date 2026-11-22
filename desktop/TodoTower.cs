@@ -395,15 +395,9 @@ namespace WinIsland
             c.W = cardW;
             c.H = _cardH;
 
-            Border b = new Border();
-            b.Width = cardW;
-            b.Height = _cardH;
-            /* 实心灰条：不透明、圆角小一点。半透明薄板叠在一起时靠描边分辨，
-               实心的靠颜色本身分辨；圆角大了会让一摞变成一串珠子。 */
-            b.CornerRadius = new CornerRadius(Math.Min(6, _cardH * 0.24));
-            b.Background = new SolidColorBrush(_look.CardBg);
-            b.BorderThickness = new Thickness(1);
-            b.BorderBrush = new SolidColorBrush(_look.CardEdge);
+            /* 实心灰条的材质在 Ui.SolidBar：剪贴板的历史条取的是同一块。
+               纸片的宽度跟着正文走，所以宽高由这里量完再传进去。 */
+            Border b = Ui.SolidBar(cardW, _cardH, _look);
             b.Tag = "act";                       /* 按纸片不要拖动整个岛 */
             b.Cursor = Cursors.Hand;
             /* 稳定标记：验收脚本靠它认出「这是纸片」，不要去比宽度 ——
