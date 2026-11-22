@@ -137,9 +137,6 @@ namespace WinIsland
             return Apply("clip " + clip, delegate(PetWindow p) { p.PlayClip(clip); });
         }
 
-        /// <summary>恢复随机待机：换回 idle 片段池，由 runtime 自己洗牌。</summary>
-        public static bool RandomIdle() { return SetState("idle"); }
-
         /// <summary>
         /// 统一的「对活着的桌宠做一件事」入口。没开就返回 false，不偷偷建窗 ——
         /// 建不建窗是菜单「启用」那一项的事，别的动作不该有副作用。

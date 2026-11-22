@@ -27,10 +27,6 @@ namespace WinIsland
            只放「星形域」形状（每个角度只有一个半径），这样所有形状都能互相插值。 */
         public static readonly string[] Names = new string[] { "circle", "squircle", "hexagon", "blob", "cloud" };
 
-        /* 换形状的抽取池：多放几个 circle，让桌宠大部分时间就是个球，
-           偶尔才变成别的形状。全随机的话第一眼会像 bug 而不是特性。 */
-        static readonly int[] Pool = new int[] { 0, 0, 0, 1, 0, 3, 1, 2, 0, 4 };
-
         /// <summary>单个形状在角度 theta 处的归一化半径。</summary>
         static double RadiusOf(int id, double theta)
         {
@@ -80,24 +76,6 @@ namespace WinIsland
                 r[i] = a + (b - a) * f;
             }
             return r;
-        }
-
-        /// <summary>确定性伪随机：给定片段号抽出形状。纯函数，可重放。</summary>
-        public static int PickShape(double seg)
-        {
-            if (seg < 0) return 0;
-            uint h = Hash((uint)((int)seg + 1) * 2654435761u);
-            return Pool[h % (uint)Pool.Length];
-        }
-
-        public static uint Hash(uint x)
-        {
-            x ^= x >> 16;
-            x *= 0x7feb352du;
-            x ^= x >> 15;
-            x *= 0x846ca68bu;
-            x ^= x >> 16;
-            return x;
         }
 
         /// <summary>身体轮廓，按球面朝向做轻微透视压缩。</summary>

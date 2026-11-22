@@ -120,7 +120,7 @@ namespace WinIsland
                参考片段里有整圈翻滚（Working_A / Working_F 的 pitch 收到 -360，
                Bodymoves_A 收到 +360）。桥接是**线性**插值：从 -360 拉回 0 会让球
                在 0.35s 里倒着猛转一整圈（实测峰值 3348 度/秒，见
-               shots/pet-integration/anim/runtime-scan.csv 的 REVERSE 行）。
+               shots/pet-integration/anim-final/runtime-scan.csv 的 REVERSE 行）。
                归一之后 -360 与 0 等价，这一段就真的不动了，翻滚本身照旧由片段内的
                关键帧驱动。 */
             const double degrees=180/Math.PI;

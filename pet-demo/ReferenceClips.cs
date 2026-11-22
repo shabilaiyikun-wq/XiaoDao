@@ -128,7 +128,7 @@ namespace WinIsland
              * Marketing_B/C 与 Working_D 整段只有 neutral→calm，
                被丢掉以后这段的 calm 直接读成 neutral。
            实测 28 段里有 8 段表情帧错、3 段整段 calm 丢失（见 shots/pet-integration/
-           anim/expression-mapping.csv）。所以这里必须把这些名字都收进来。
+           anim-final/expression-mapping.csv）。所以这里必须把这些名字都收进来。
 
            别名按上游 expressionAliases 归一：
              strange→inspecting, inspect→inspecting, squint→squinted,

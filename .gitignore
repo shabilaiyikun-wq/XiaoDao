@@ -5,3 +5,9 @@ work/
 desktop/obj/
 selftest-report.json
 .DS_Store
+
+# 探针与截图产物：跑一次就往源码目录丢一堆 png/probe 文件。
+# 要留档请落到 shots/（那是归档目录），源码目录只放代码。
+desktop/*.png
+desktop/pet-island-probe.*
+!desktop/pet-selftest.png

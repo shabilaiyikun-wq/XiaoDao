@@ -924,30 +924,7 @@ static IntPtr FindMainWindow(App app)
     if (byTitle != IntPtr.Zero) return byTitle;
     if (app == App.WeChat) return IntPtr.Zero;
     return byArea;
-}        /* 找该应用「最大的那个可见窗口」当主窗。藏到离屏的也算，
-           因为 ShowWindow(SW_RESTORE) 能把位置拉回来。 */
-        static IntPtr FindWindowOf(App app)
-        {
-            IntPtr best = IntPtr.Zero;
-            long bestArea = 0;
-            Dictionary<uint, App> map = _pidApp;
-
-            EnumWindows(delegate(IntPtr h, IntPtr p)
-            {
-                uint pid;
-                GetWindowThreadProcessId(h, out pid);
-                App a;
-                if (!map.TryGetValue(pid, out a) || a != app) return true;
-
-                RECT r;
-                if (!GetWindowRect(h, out r)) return true;
-                long area = (long)(r.R - r.L) * (long)(r.B - r.T);
-                if (area > bestArea) { bestArea = area; best = h; }
-                return true;
-            }, IntPtr.Zero);
-
-            return best;
-        }
+}
 
         /* ---------------------------------------------------------------- Win32 */
 

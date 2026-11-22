@@ -29,7 +29,6 @@ namespace WinIsland
         public const string GRefresh = "\uE72C";
         public const string GFolder = "\uE8B7";
         public const string GCopy = "\uE8C8";
-        public const string GWarn = "\uE7BA";
 
         public static Color Mix(Color a, Color b, double t)
         {

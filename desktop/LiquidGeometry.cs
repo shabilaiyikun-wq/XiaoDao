@@ -70,11 +70,6 @@ namespace WinIsland
         {
             Id = id; X = x; Y = y; R = r;
         }
-
-        public LiquidBody Clone()
-        {
-            return new LiquidBody(Id, X, Y, R);
-        }
     }
 
     /// <summary>
@@ -387,32 +382,5 @@ namespace WinIsland
             into.Figures.Add(f);
         }
 
-        /// <summary>一个圆盘的独立几何（探针画单个体时用）。</summary>
-        public static Geometry Disc(LiquidBody b)
-        {
-            if (b == null || b.R <= DegenerateRadius) return null;
-            PathGeometry g = new PathGeometry();
-            g.FillRule = FillRule.Nonzero;
-            AppendDisc(g, b);
-            g.Freeze();
-            return g;
-        }
-
-        /// <summary>一条颈部的独立几何（探针单独量颈部像素时用）。</summary>
-        public static Geometry BridgeGeometry(BridgeShape s)
-        {
-            if (s == null) return null;
-            PathGeometry g = new PathGeometry();
-            g.FillRule = FillRule.Nonzero;
-            AppendBridge(g, s);
-            g.Freeze();
-            return g;
-        }
-
-        /// <summary>空几何。WPF 里 Geometry.Empty 是共享单例，可以直接挂到路径上但不能再 Append。</summary>
-        public static Geometry Empty()
-        {
-            return Geometry.Empty;
-        }
     }
 }
